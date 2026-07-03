@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  VERSION_DEFINITIONS,
   SHIFT_DEFINITIONS,
   DEFAULT_SHIFT_DEFINITION_LIST,
   CUSTOM_VERSION_ID,
@@ -16,12 +17,14 @@ const {
   deleteCustomVersion,
   getCalendarWorkSegments,
   getRuleStatusText,
+  getScheduleTagPopoverText,
   getVersionActionsViewModel,
   loadBaseVersionDefinitions,
   loadActiveShiftDefinitionsForSchedule,
   loadCustomVersionLibrary,
   loadDisplaySettings,
   loadScheduleSettings,
+  normalizeDisplaySettings,
   renameCustomVersion,
   promoteCurrentCustomVersionLibrary,
   saveBaseVersionDefinitions,
@@ -32,11 +35,14 @@ const {
   SHIFT_SETTINGS_STORAGE_KEY,
   getWeekendHoursForShift,
   getShiftSettingsViewModel,
+  getScheduleDayHeader,
   getScheduleTableSizing,
   loadShiftDefinitions,
   normalizeShiftDefinitions,
   parseCycleInput,
   removeShiftDefinition,
+  getAnnualCounterBalance,
+  renderAnnualCounterCell,
 } = require("./app.js");
 
 function getRule(cycle, ruleId) {
@@ -171,12 +177,51 @@ test("une serie de nuits doit etre suivie d'une descente de nuit", () => {
   expectRuleStatus("N N N DN R R R", "night-dn", "pass");
 });
 
+test("la regle de descente apres nuits ne limite pas son libelle au plafond de trois nuits", () => {
+  const simulation = createSimulation("v7", {
+    startDate: "2026-01-05",
+    weekendDispoLimit: "0",
+    seriesOffset: "1",
+    cycle: "N N N N DN R R",
+  });
+  const rule = simulation.rules.find((candidate) => candidate.id === "night-dn");
+
+  assert.equal(rule.status, "pass");
+  assert.equal(rule.detail, "Chaque série d'au moins une nuit est suivie d'une descente.");
+});
+
 test("une descente de nuit ne peut suivre qu'une serie de nuits", () => {
   const rule = getRule("M DN R R R R R", "night-dn");
 
   assert.equal(rule.status, "fail");
   assert.equal(rule.title, "Descente après série de nuits");
   assert.match(rule.detail, /DN sans nuit précédente/);
+});
+
+test("apres une descente de plusieurs nuits aucune reprise ne commence avant midi", () => {
+  const shiftDefinitions = normalizeShiftDefinitions([
+    ...DEFAULT_SHIFT_DEFINITION_LIST,
+    {
+      code: "X",
+      label: "Reprise avant midi",
+      color: "#4f46e5",
+      startTime: "11:00",
+      endTime: "19:00",
+      isOff: false,
+    },
+  ]);
+  const simulation = createSimulation("v7", {
+    startDate: "2026-01-05",
+    weekendDispoLimit: "0",
+    seriesOffset: "1",
+    cycle: "N N DN X R R R",
+    shiftDefinitions,
+  });
+  const rule = simulation.rules.find((candidate) => candidate.id === "dispo-after-multi-night");
+
+  assert.equal(rule.title, "Pas de reprise avant midi après DN de plusieurs nuits");
+  assert.equal(rule.status, "fail");
+  assert.match(rule.detail, /S01 08\/01/);
 });
 
 test("le statut orange s'affiche comme OK avec derogation", () => {
@@ -622,6 +667,12 @@ test("la date de depart est un reglage d'affichage separe des versions", () => {
   assert.equal(loadedDisplay.startDate, "2026-02-02");
 });
 
+test("la date de depart est toujours ramenee au lundi de la semaine", () => {
+  assert.equal(normalizeDisplaySettings({ startDate: "2026-02-02" }).startDate, "2026-02-02");
+  assert.equal(normalizeDisplaySettings({ startDate: "2026-02-03" }).startDate, "2026-02-02");
+  assert.equal(normalizeDisplaySettings({ startDate: "2026-02-08" }).startDate, "2026-02-02");
+});
+
 test("un horaire custom peut choisir un nombre de series qui fixe aussi les semaines", () => {
   const official = createScheduleSettingsForVersion("v7", SHIFT_DEFINITIONS);
   const custom = createCustomScheduleSettings(official, {
@@ -651,6 +702,15 @@ test("la largeur du tableau suit le nombre de semaines avec des cellules fixes",
   assert.equal(twelveWeeks.dayCount, 84);
   assert.equal(sevenWeeks.tableWidth, 92 + 49 * 64);
   assert.equal(twelveWeeks.tableWidth, 92 + 84 * 64);
+});
+
+test("les en-tetes du tableau horaire affichent les dates au lieu des numeros de semaine", () => {
+  const header = getScheduleDayHeader(new Date(2026, 0, 5));
+
+  assert.deepEqual(header, {
+    dateLabel: "05/01",
+    dayLabel: "Lun",
+  });
 });
 
 test("plusieurs versions custom conservent leurs horaires et pauses separement", () => {
@@ -846,7 +906,7 @@ test("la version 7 series equilibree respecte les regles sans echec", () => {
   const warningIds = simulation.rules.filter((rule) => rule.status === "warn").map((rule) => rule.id);
 
   assert.deepEqual(failures, []);
-  assert.deepEqual(warningIds, ["night-hours-cap"]);
+  assert.deepEqual(warningIds, ["weekend-free", "night-hours-cap"]);
   assert.equal(simulation.version.seriesCount, 7);
   assert.equal(simulation.version.weeks, 7);
   assert.equal(simulation.seriesOffset, 7);
@@ -878,7 +938,7 @@ test("la version 7 series equilibree utilise deux Dispo courtes officielles", ()
   assert.equal(shifts.D2.unpaidBreakMinutes, 30);
   assert.equal(shifts.D2.hours, 5.5);
   assert.equal(weekdayDispoRule.status, "pass");
-  assert.equal(weekdayDispoRule.title, "Au moins 2 Dispo par jour ouvrable");
+  assert.equal(weekdayDispoRule.title, "Au moins 1 Dispo par jour ouvrable");
 });
 
 test("les versions existantes gardent leur cible de deux Dispo classiques", () => {
@@ -904,13 +964,91 @@ test("les compteurs annuels de la version equilibree restent proches entre serie
   });
   const spread = (values) => Math.max(...values) - Math.min(...values);
 
-  assert.equal(spread(simulation.stats.map((row) => row.weekendWorkedYear)), 3);
-  assert.equal(spread(simulation.stats.map((row) => row.weekendHoursYear)), 61);
-  assert.equal(spread(simulation.stats.map((row) => row.nightCount)), 5);
-  assert.equal(spread(simulation.stats.map((row) => row.nightHoursYear)), 40);
-  assert.equal(spread(simulation.stats.map((row) => row.totalHours)), 32);
+  assert.equal(spread(simulation.stats.map((row) => row.weekendWorkedYear)), 1);
+  assert.equal(spread(simulation.stats.map((row) => row.weekendHoursYear)), 24);
+  assert.equal(spread(simulation.stats.map((row) => row.nightCount)), 2);
+  assert.equal(spread(simulation.stats.map((row) => row.nightHoursYear)), 16);
+  assert.equal(spread(simulation.stats.map((row) => row.totalHours)), 32.5);
   assert.equal(Math.max(...simulation.stats.map((row) => row.averageWeeklyHours)) < 38, true);
-  assert.equal(Math.max(...simulation.stats.map((row) => row.weekendWorkedYear)) <= 28, true);
+  assert.equal(Math.max(...simulation.stats.map((row) => row.weekendWorkedYear)) <= 34, true);
+});
+
+test("les compteurs annuels signalent les valeurs hors marge de cinq pourcents", () => {
+  const balance = getAnnualCounterBalance([
+    {
+      seriesId: "S01",
+      nightHoursYear: 100,
+      weekendWorkedYear: 20,
+      weekendHoursYear: 240,
+      weekendHoursMonth: 20,
+    },
+    {
+      seriesId: "S02",
+      nightHoursYear: 106,
+      weekendWorkedYear: 21,
+      weekendHoursYear: 252,
+      weekendHoursMonth: 21,
+    },
+    {
+      seriesId: "S03",
+      nightHoursYear: 110,
+      weekendWorkedYear: 20,
+      weekendHoursYear: 252,
+      weekendHoursMonth: 21,
+    },
+  ]);
+
+  assert.equal(balance.S01.nightHoursYear.imbalanced, true);
+  assert.equal(balance.S02.nightHoursYear.imbalanced, false);
+  assert.equal(balance.S03.nightHoursYear.imbalanced, false);
+  assert.equal(balance.S01.weekendWorkedYear.imbalanced, false);
+  assert.equal(balance.S01.weekendHoursYear.imbalanced, false);
+  assert.equal(balance.S01.weekendHoursMonth.imbalanced, false);
+  assert.ok(Math.abs(balance.S01.nightHoursYear.lower - 100.06666666666666) < 0.0000001);
+  assert.ok(Math.abs(balance.S01.nightHoursYear.upper - 110.6) < 0.0000001);
+});
+
+test("une valeur annuelle desequilibree affiche un popover explicatif au survol", () => {
+  const balance = getAnnualCounterBalance([
+    {
+      seriesId: "S01",
+      nightHoursYear: 100,
+      weekendWorkedYear: 20,
+      weekendHoursYear: 240,
+      weekendHoursMonth: 20,
+    },
+    {
+      seriesId: "S02",
+      nightHoursYear: 106,
+      weekendWorkedYear: 21,
+      weekendHoursYear: 252,
+      weekendHoursMonth: 21,
+    },
+    {
+      seriesId: "S03",
+      nightHoursYear: 110,
+      weekendWorkedYear: 20,
+      weekendHoursYear: 252,
+      weekendHoursMonth: 21,
+    },
+  ]);
+  const cell = renderAnnualCounterCell(balance.S01, "nightHoursYear", 100);
+
+  assert.doesNotMatch(cell, /stats-popover-trigger/);
+  assert.match(cell, /data-floating-popover="true"/);
+  assert.match(cell, /data-popover=/);
+  assert.match(cell, /Pourquoi cette valeur est rouge/);
+  assert.match(cell, /Heures de nuit \/ an/);
+  assert.match(cell, /Moyenne des séries/);
+  assert.match(cell, /Marge acceptée/);
+  assert.match(cell, /sous la marge/);
+});
+
+test("les tags de visualisation exposent le texte du popover flottant", () => {
+  assert.equal(
+    getScheduleTagPopoverText("Nuit précédente", "7 h travaillées"),
+    "Nuit précédente · 7 h travaillées",
+  );
 });
 
 function analyzeCycleSequence(cycleInput) {
@@ -965,54 +1103,9 @@ function getDisplayWorkedWeekends(simulation) {
   return workedWeekends;
 }
 
-test("la version 7 series equilibree V2 enchaine les matins apres-midis nuits sans nuits lourdes", () => {
-  const settings = createScheduleSettingsForVersion("v7-balanced-v2", SHIFT_DEFINITIONS);
-  const simulation = createSimulation("v7-balanced-v2", {
-    startDate: "2026-01-05",
-  });
-  const failures = simulation.rules.filter((rule) => rule.status === "fail");
-  const warningIds = simulation.rules.filter((rule) => rule.status === "warn").map((rule) => rule.id);
-  const sequence = analyzeCycleSequence(settings.cycle);
-
-  assert.equal(simulation.version.label, "10h - 7 Séries Équilibré V2");
-  assert.equal(settings.cycle.split(" ").length, 49);
-  assert.equal(settings.seriesOffset, "7");
-  assert.deepEqual(failures, []);
-  assert.deepEqual(warningIds, ["weekend-free", "night-hours-cap"]);
-  assert.equal(sequence.manStarts.length >= 4, true);
-  assert.deepEqual(sequence.nightPairs, [
-    {
-      startIndex: 18,
-      startWeekday: 4,
-      nextWeekday: 5,
-    },
-  ]);
-  assert.equal(Math.max(...simulation.stats.map((row) => row.maxConsecutiveNights)), 2);
-});
-
-test("la version 7 series equilibree V2 reste dans les plafonds derogatoires", () => {
-  const simulation = createSimulation("v7-balanced-v2", {
-    startDate: "2026-01-05",
-  });
-  const shifts = loadActiveShiftDefinitionsForSchedule(
-    createScheduleSettingsForVersion("v7-balanced-v2", SHIFT_DEFINITIONS),
-  );
-  const spread = (values) => Math.max(...values) - Math.min(...values);
-
-  assert.equal(shifts.D, undefined);
-  assert.equal(shifts.D1.role, "D");
-  assert.equal(shifts.D2.role, "D");
-  assert.equal(Math.max(...simulation.stats.map((row) => row.averageWeeklyHours)) < 38, true);
-  assert.equal(Math.max(...simulation.stats.map((row) => row.max168Hours)), 50);
-  assert.equal(Math.max(...simulation.stats.map((row) => row.weekendWorkedYear)) <= 34, true);
-  assert.equal(Math.max(...simulation.stats.map((row) => row.nightHoursYear)) <= 480, true);
-  assert.equal(spread(simulation.stats.map((row) => row.weekendWorkedYear)), 2);
-  assert.equal(spread(simulation.stats.map((row) => row.nightCount)), 2);
-});
-
-test("la version 7 series equilibree V3 supprime les nuits alternees fatigantes", () => {
-  const settings = createScheduleSettingsForVersion("v7-balanced-v3", SHIFT_DEFINITIONS);
-  const simulation = createSimulation("v7-balanced-v3", {
+test("la version 7 series equilibree supprime les nuits alternees fatigantes", () => {
+  const settings = createScheduleSettingsForVersion("v7-balanced", SHIFT_DEFINITIONS);
+  const simulation = createSimulation("v7-balanced", {
     startDate: "2026-01-05",
   });
   const failures = simulation.rules.filter((rule) => rule.status === "fail");
@@ -1021,7 +1114,7 @@ test("la version 7 series equilibree V3 supprime les nuits alternees fatigantes"
   const morningCoverageRule = simulation.rules.find((rule) => rule.id === "daily-morning-coverage");
   const sequence = analyzeCycleSequence(settings.cycle);
 
-  assert.equal(simulation.version.label, "10h - 7 Séries Équilibré V3");
+  assert.equal(simulation.version.label, "10h - 7 Séries Équilibré");
   assert.equal(settings.cycle.split(" ").length, 49);
   assert.equal(settings.seriesOffset, "7");
   assert.deepEqual(failures, []);
@@ -1039,8 +1132,8 @@ test("la version 7 series equilibree V3 supprime les nuits alternees fatigantes"
   assert.equal(Math.max(...simulation.stats.map((row) => row.maxConsecutiveNights)) <= 2, true);
 });
 
-test("la version 7 series equilibree V3 concentre les week-ends travailles", () => {
-  const simulation = createSimulation("v7-balanced-v3", {
+test("la version 7 series equilibree concentre les week-ends travailles", () => {
+  const simulation = createSimulation("v7-balanced", {
     startDate: "2026-01-05",
   });
   const workedWeekends = getDisplayWorkedWeekends(simulation);
@@ -1061,4 +1154,48 @@ test("la version 7 series equilibree V3 concentre les week-ends travailles", () 
   assert.equal(Math.max(...simulation.stats.map((row) => row.nightHoursYear)) <= 480, true);
   assert.equal(spread(simulation.stats.map((row) => row.weekendWorkedYear)) <= 1, true);
   assert.equal(spread(simulation.stats.map((row) => row.nightCount)) <= 3, true);
+});
+
+test("la version 7 series equilibree publie uniquement le cycle V3 sous le nom equilibre", () => {
+  const officialIds = Object.keys(VERSION_DEFINITIONS);
+  const settings = createScheduleSettingsForVersion("v7-balanced", SHIFT_DEFINITIONS);
+  const simulation = createSimulation("v7-balanced", {
+    startDate: "2026-01-05",
+  });
+  const weekdayDispoRule = simulation.rules.find((rule) => rule.id === "weekday-dispo");
+  const morningCoverageRule = simulation.rules.find((rule) => rule.id === "daily-morning-coverage");
+  const workedWeekends = getDisplayWorkedWeekends(simulation);
+
+  assert.equal(officialIds.includes("v7-balanced"), true);
+  assert.equal(officialIds.includes("v7-balanced-v2"), false);
+  assert.equal(officialIds.includes("v7-balanced-v3"), false);
+  assert.equal(simulation.version.label, "10h - 7 Séries Équilibré");
+  assert.equal(settings.cycle.split(" ").length, 49);
+  assert.equal(weekdayDispoRule?.title, "Au moins 1 Dispo par jour ouvrable");
+  assert.equal(morningCoverageRule?.title, "Un Matin par jour, week-end doublable");
+  assert.equal(workedWeekends.filter((weekend) => weekend.codes === "M/M").length, 7);
+  assert.equal(workedWeekends.filter((weekend) => weekend.codes === "A/A").length, 7);
+});
+
+test("les anciennes selections equilibrees migrent vers la version equilibree unique", () => {
+  const storage = {
+    getItem(key) {
+      if (key === CUSTOM_VERSIONS_STORAGE_KEY) {
+        return JSON.stringify({
+          selectedVersionId: "v7-balanced-v3",
+          customVersions: [],
+        });
+      }
+      if (key === SCHEDULE_SETTINGS_STORAGE_KEY) {
+        return JSON.stringify({
+          versionId: "v7-balanced-v2",
+          baseVersionId: "v7-balanced-v2",
+        });
+      }
+      return null;
+    },
+  };
+
+  assert.equal(loadCustomVersionLibrary(storage).selectedVersionId, "v7-balanced");
+  assert.equal(loadScheduleSettings(storage, SHIFT_DEFINITIONS).versionId, "v7-balanced");
 });

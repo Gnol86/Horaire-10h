@@ -490,33 +490,7 @@ tbody tr:last-child td {
   position: relative;
   width: 100%;
   min-width: 42px;
-}
-
-.schedule-table .tag::after {
-  position: absolute;
-  left: 50%;
-  top: calc(100% + 6px);
-  z-index: 20;
-  display: none;
-  width: max-content;
-  max-width: 220px;
-  transform: translateX(-50%);
-  border-radius: 6px;
-  background: #24231f;
-  color: #fffdf7;
-  content: attr(data-source) " · " attr(data-hours);
-  font-size: 0.72rem;
-  font-weight: 800;
-  line-height: 1.1;
-  padding: 6px 8px;
-  pointer-events: none;
-  box-shadow: 0 8px 24px rgba(36, 35, 31, 0.22);
-  white-space: nowrap;
-}
-
-.schedule-table .tag:hover::after,
-.schedule-table .tag:focus-visible::after {
-  display: block;
+  cursor: help;
 }
 
 .cell-note {
@@ -598,6 +572,34 @@ tbody tr:last-child td {
 .number {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.stats-value-imbalanced {
+  position: relative;
+  background: #fff4f4;
+  color: var(--fail);
+  cursor: help;
+  font-weight: 800;
+  outline-offset: -3px;
+}
+
+.floating-popover {
+  position: fixed;
+  z-index: 1000;
+  width: max-content;
+  max-width: min(340px, calc(100vw - 48px));
+  border: 1px solid rgba(181, 56, 56, 0.35);
+  border-radius: 6px;
+  background: #24231f;
+  color: #fffdf7;
+  font-size: 0.74rem;
+  font-weight: 800;
+  line-height: 1.35;
+  padding: 8px 10px;
+  pointer-events: none;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 8px 24px rgba(36, 35, 31, 0.22);
 }
 
 .calculation-note {

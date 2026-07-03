@@ -17,112 +17,22 @@
   const DEFAULT_VERSION_ID = "current";
   const CURRENT_VERSION_LABEL = "Horaire actuel";
   const DEFAULT_WEEKDAY_DISPO_TARGET = 2;
+  const ANNUAL_COUNTER_BALANCE_TOLERANCE = 0.05;
+  const ANNUAL_COUNTER_BALANCE_KEYS = [
+    "nightHoursYear",
+    "weekendWorkedYear",
+    "weekendHoursYear",
+    "weekendHoursMonth",
+  ];
+  const ANNUAL_COUNTER_LABELS = {
+    nightHoursYear: "Heures de nuit / an",
+    weekendWorkedYear: "Week-ends travaillés / an",
+    weekendHoursYear: "Heures WE / an",
+    weekendHoursMonth: "Heures WE / mois",
+  };
   const BALANCED_7_VERSION_ID = "v7-balanced";
-  const BALANCED_7_V2_VERSION_ID = "v7-balanced-v2";
-  const BALANCED_7_V3_VERSION_ID = "v7-balanced-v3";
+  const LEGACY_BALANCED_7_VERSION_IDS = new Set(["v7-balanced-v2", "v7-balanced-v3"]);
   const BALANCED_7_CYCLE = [
-    "M",
-    "D2",
-    "R",
-    "M",
-    "R",
-    "M",
-    "M",
-    "A",
-    "R",
-    "R",
-    "D1",
-    "N",
-    "N",
-    "N",
-    "DN",
-    "R",
-    "D1",
-    "N",
-    "DN",
-    "A",
-    "A",
-    "R",
-    "D1",
-    "A",
-    "R",
-    "M",
-    "D1",
-    "R",
-    "N",
-    "N",
-    "N",
-    "DN",
-    "A",
-    "R",
-    "D2",
-    "D2",
-    "M",
-    "M",
-    "D2",
-    "D1",
-    "D2",
-    "D1",
-    "D1",
-    "A",
-    "D2",
-    "A",
-    "D2",
-    "R",
-    "R",
-  ];
-  const BALANCED_7_V2_CYCLE = [
-    "A",
-    "N",
-    "DN",
-    "N",
-    "DN",
-    "R",
-    "R",
-    "D2",
-    "M",
-    "D2",
-    "M",
-    "A",
-    "R",
-    "R",
-    "D1",
-    "D1",
-    "D1",
-    "A",
-    "N",
-    "N",
-    "DN",
-    "R",
-    "D2",
-    "M",
-    "D2",
-    "D2",
-    "R",
-    "R",
-    "M",
-    "A",
-    "N",
-    "DN",
-    "R",
-    "M",
-    "A",
-    "N",
-    "DN",
-    "A",
-    "R",
-    "M",
-    "A",
-    "N",
-    "DN",
-    "R",
-    "R",
-    "D1",
-    "D1",
-    "R",
-    "M",
-  ];
-  const BALANCED_7_V3_CYCLE = [
     "N",
     "DN",
     "R",
@@ -215,24 +125,6 @@
       seriesCount: 7,
       seriesOffset: "7",
       cycle: BALANCED_7_CYCLE,
-      weekdayDispoTarget: 2,
-    },
-    [BALANCED_7_V2_VERSION_ID]: {
-      id: BALANCED_7_V2_VERSION_ID,
-      label: "10h - 7 Séries Équilibré V2",
-      weeks: 7,
-      seriesCount: 7,
-      seriesOffset: "7",
-      cycle: BALANCED_7_V2_CYCLE,
-      weekdayDispoTarget: 2,
-    },
-    [BALANCED_7_V3_VERSION_ID]: {
-      id: BALANCED_7_V3_VERSION_ID,
-      label: "10h - 7 Séries Équilibré V3",
-      weeks: 7,
-      seriesCount: 7,
-      seriesOffset: "7",
-      cycle: BALANCED_7_V3_CYCLE,
       weekdayDispoTarget: 1,
       allowWeekendDoubleCoverage: true,
     },
@@ -246,6 +138,7 @@
   const CUSTOM_VERSIONS_STORAGE_KEY = "horaire10h.customVersions.v1";
   const DISPLAY_SETTINGS_STORAGE_KEY = "horaire10h.displaySettings.v1";
   const SHIFT_CODE_PATTERN = /^[A-Z0-9]{1,4}$/;
+  const START_DATE_STEP_BASE = "1970-01-05";
   const DEFAULT_SHIFT_DEFINITION_LIST = [
     {
       code: "M",
@@ -666,8 +559,13 @@
     };
   }
 
+  function normalizeOfficialVersionId(versionId) {
+    const id = String(versionId || "");
+    return LEGACY_BALANCED_7_VERSION_IDS.has(id) ? BALANCED_7_VERSION_ID : id;
+  }
+
   function isOfficialVersionId(versionId) {
-    return Boolean(VERSION_DEFINITIONS[versionId]);
+    return Boolean(VERSION_DEFINITIONS[normalizeOfficialVersionId(versionId)]);
   }
 
   function getDefaultVersionId() {
@@ -702,15 +600,12 @@
   }
 
   function usesBalanced7ShiftDefinitions(versionId) {
-    return (
-      versionId === BALANCED_7_VERSION_ID ||
-      versionId === BALANCED_7_V2_VERSION_ID ||
-      versionId === BALANCED_7_V3_VERSION_ID
-    );
+    return normalizeOfficialVersionId(versionId) === BALANCED_7_VERSION_ID;
   }
 
   function getOfficialShiftDefinitions(versionId) {
-    const definition = VERSION_DEFINITIONS[versionId] || VERSION_DEFINITIONS[getDefaultVersionId()];
+    const officialVersionId = normalizeOfficialVersionId(versionId);
+    const definition = VERSION_DEFINITIONS[officialVersionId] || VERSION_DEFINITIONS[getDefaultVersionId()];
     if (usesBalanced7ShiftDefinitions(definition.id)) {
       return normalizeShiftDefinitions(BALANCED_7_SHIFT_DEFINITION_LIST);
     }
@@ -836,7 +731,8 @@
   function getVersionDefinition(versionId, scheduleSettings = null) {
     if (isCustomVersionId(versionId)) {
       const baseVersion =
-        VERSION_DEFINITIONS[scheduleSettings?.baseVersionId] || VERSION_DEFINITIONS[getDefaultVersionId()];
+        VERSION_DEFINITIONS[normalizeOfficialVersionId(scheduleSettings?.baseVersionId)] ||
+        VERSION_DEFINITIONS[getDefaultVersionId()];
       const seriesCount = parseSeriesCount(scheduleSettings?.seriesCount, baseVersion.seriesCount);
       return {
         ...baseVersion,
@@ -846,11 +742,12 @@
         seriesCount,
       };
     }
-    return VERSION_DEFINITIONS[versionId] || VERSION_DEFINITIONS[getDefaultVersionId()];
+    return VERSION_DEFINITIONS[normalizeOfficialVersionId(versionId)] || VERSION_DEFINITIONS[getDefaultVersionId()];
   }
 
   function createScheduleSettingsForVersion(versionId, shiftDefinitions = SHIFT_DEFINITIONS) {
-    const definition = VERSION_DEFINITIONS[versionId] || VERSION_DEFINITIONS[getDefaultVersionId()];
+    const definition =
+      VERSION_DEFINITIONS[normalizeOfficialVersionId(versionId)] || VERSION_DEFINITIONS[getDefaultVersionId()];
     return {
       versionId: definition.id,
       baseVersionId: definition.id,
@@ -862,9 +759,9 @@
   }
 
   function createCustomScheduleSettings(currentSettings, updates = {}) {
-    const currentVersionId = currentSettings?.versionId || getDefaultVersionId();
+    const currentVersionId = normalizeOfficialVersionId(currentSettings?.versionId || getDefaultVersionId());
     const baseVersionId =
-      currentSettings?.baseVersionId ||
+      normalizeOfficialVersionId(currentSettings?.baseVersionId) ||
       (VERSION_DEFINITIONS[currentVersionId] ? currentVersionId : getDefaultVersionId());
     const { startDate: _currentStartDate, ...currentVersionSettings } = currentSettings || {};
     const { startDate: _updatedStartDate, ...updatedVersionSettings } = updates;
@@ -879,15 +776,16 @@
 
   function normalizeScheduleSettings(input = {}, shiftDefinitions = SHIFT_DEFINITIONS) {
     const requestedVersionId = input.versionId || getDefaultVersionId();
+    const requestedOfficialVersionId = normalizeOfficialVersionId(requestedVersionId);
     const baseVersionId =
-      input.baseVersionId ||
-      (VERSION_DEFINITIONS[requestedVersionId] ? requestedVersionId : getDefaultVersionId());
+      normalizeOfficialVersionId(input.baseVersionId) ||
+      (VERSION_DEFINITIONS[requestedOfficialVersionId] ? requestedOfficialVersionId : getDefaultVersionId());
     const normalizedBaseVersionId = VERSION_DEFINITIONS[baseVersionId] ? baseVersionId : getDefaultVersionId();
     const versionId =
       isCustomVersionId(requestedVersionId)
         ? CUSTOM_VERSION_ID
-        : VERSION_DEFINITIONS[requestedVersionId]
-          ? requestedVersionId
+        : VERSION_DEFINITIONS[requestedOfficialVersionId]
+          ? requestedOfficialVersionId
           : normalizedBaseVersionId;
     const outputVersionId =
       isCustomVersionId(requestedVersionId) ? requestedVersionId : versionId;
@@ -940,10 +838,9 @@
   }
 
   function normalizeDisplaySettings(input = {}) {
+    const startDate = normalizeStartDateInput(input.startDate);
     return {
-      startDate: /^\d{4}-\d{2}-\d{2}$/.test(input.startDate || "")
-        ? input.startDate
-        : "2026-01-05",
+      startDate,
     };
   }
 
@@ -994,10 +891,10 @@
       input.scheduleSettings ||
       createScheduleSettingsForVersion(input.baseVersionId || getDefaultVersionId(), shiftDefinitions);
     const baseVersionId =
-      input.baseVersionId ||
-      rawScheduleSettings.baseVersionId ||
+      normalizeOfficialVersionId(input.baseVersionId) ||
+      normalizeOfficialVersionId(rawScheduleSettings.baseVersionId) ||
       (isOfficialVersionId(rawScheduleSettings.versionId)
-        ? rawScheduleSettings.versionId
+        ? normalizeOfficialVersionId(rawScheduleSettings.versionId)
         : getDefaultVersionId());
     const scheduleSettings = normalizeScheduleSettings(
       {
@@ -1033,9 +930,12 @@
       ? input.customVersions.map((version) => createCustomVersion(version))
       : [];
     const selectedVersionId = String(input.selectedVersionId || "");
+    const selectedOfficialVersionId = normalizeOfficialVersionId(selectedVersionId);
     const hasSelectedCustom = customVersions.some((version) => version.id === selectedVersionId);
     const normalizedSelectedVersionId = hasSelectedCustom || isOfficialVersionId(selectedVersionId)
-      ? selectedVersionId
+      ? hasSelectedCustom
+        ? selectedVersionId
+        : selectedOfficialVersionId
       : customVersions[0]?.id || getDefaultVersionId();
 
     return {
@@ -1062,7 +962,7 @@
 
     return {
       selectedVersionId: isOfficialVersionId(storedScheduleSettings.versionId)
-        ? storedScheduleSettings.versionId
+        ? normalizeOfficialVersionId(storedScheduleSettings.versionId)
         : getDefaultVersionId(),
       customVersions: [],
     };
@@ -1147,6 +1047,13 @@
     };
   }
 
+  function getScheduleDayHeader(date) {
+    return {
+      dateLabel: formatDateShort(date),
+      dayLabel: DAY_NAMES[date.getDay()],
+    };
+  }
+
   function pad(value) {
     return String(value).padStart(2, "0");
   }
@@ -1161,6 +1068,15 @@
 
   function toDateInputValue(date) {
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  }
+
+  function normalizeStartDateInput(value) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) {
+      return "2026-01-05";
+    }
+    const date = parseDateInput(value);
+    const daysSinceMonday = (date.getDay() + 6) % 7;
+    return toDateInputValue(addDays(date, -daysSinceMonday));
   }
 
   function addDays(date, days) {
@@ -1194,6 +1110,71 @@
       minimumFractionDigits: Number.isInteger(rounded) ? 0 : 1,
       maximumFractionDigits: 1,
     });
+  }
+
+  function escapeAttribute(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  function getAnnualCounterBalance(
+    stats,
+    keys = ANNUAL_COUNTER_BALANCE_KEYS,
+    tolerance = ANNUAL_COUNTER_BALANCE_TOLERANCE,
+  ) {
+    const balanceBySeries = {};
+    const rows = Array.isArray(stats) ? stats : [];
+
+    rows.forEach((row) => {
+      balanceBySeries[row.seriesId] = {};
+    });
+
+    keys.forEach((key) => {
+      const values = rows.map((row) => Number(row[key])).filter(Number.isFinite);
+      const average = values.length
+        ? values.reduce((sum, value) => sum + value, 0) / values.length
+        : 0;
+      const lower = average * (1 - tolerance);
+      const upper = average * (1 + tolerance);
+
+      rows.forEach((row) => {
+        const value = Number(row[key]);
+        const imbalanced = Number.isFinite(value) && (value < lower || value > upper);
+        balanceBySeries[row.seriesId][key] = {
+          value,
+          average,
+          lower,
+          upper,
+          imbalanced,
+        };
+      });
+    });
+
+    return balanceBySeries;
+  }
+
+  function renderAnnualCounterCell(balance, key, value, formatter = formatHours) {
+    const formatValue = formatter;
+    const state = balance?.[key];
+    if (!state?.imbalanced) {
+      return `<td class="number">${formatValue(value)}</td>`;
+    }
+    const metricLabel = ANNUAL_COUNTER_LABELS[key] || key;
+    const direction = state.value < state.lower ? "sous la marge" : "au-dessus de la marge";
+    const popoverBody = [
+      "Pourquoi cette valeur est rouge.",
+      metricLabel,
+      `Valeur : ${formatValue(state.value)}.`,
+      `Moyenne des séries : ${formatValue(state.average)}.`,
+      `Marge acceptée : ${formatValue(state.lower)} - ${formatValue(state.upper)}.`,
+      `Cette valeur est ${direction}.`,
+    ].join(" ");
+    return `<td class="number stats-value-imbalanced" data-imbalance="true" data-floating-popover="true" data-popover="${escapeAttribute(
+      popoverBody,
+    )}" tabindex="0">${formatValue(value)}</td>`;
   }
 
   function formatShiftDuration(hours) {
@@ -1868,6 +1849,60 @@
     return violations;
   }
 
+  function countConsecutivePlannedNightsEndingAt(
+    assignments,
+    seriesIndex,
+    dayIndex,
+    shiftDefinitions = assignments.shiftDefinitions || SHIFT_DEFINITIONS,
+  ) {
+    const maxLookback =
+      Array.isArray(assignments.cycle) && assignments.cycle.length > 0
+        ? assignments.cycle.length
+        : dayIndex + 1;
+    let count = 0;
+    for (let offset = 0; offset < maxLookback; offset += 1) {
+      const code = getContinuousPlannedCode(assignments, seriesIndex, dayIndex - offset);
+      if (!hasShiftRole(shiftDefinitions, code, "N")) {
+        break;
+      }
+      count += 1;
+    }
+    return count;
+  }
+
+  function checkPreNoonStartAfterMultiNightDn(
+    assignments,
+    shiftDefinitions = assignments.shiftDefinitions || SHIFT_DEFINITIONS,
+  ) {
+    const violations = [];
+    assignments.series.forEach((serie) => {
+      for (let dayIndex = 0; dayIndex < assignments.days.length; dayIndex += 1) {
+        const previousCode = getContinuousPlannedCode(assignments, serie.index, dayIndex - 1);
+        if (!hasShiftRole(shiftDefinitions, previousCode, "DN")) {
+          continue;
+        }
+
+        const previousNightCount = countConsecutivePlannedNightsEndingAt(
+          assignments,
+          serie.index,
+          dayIndex - 2,
+          shiftDefinitions,
+        );
+        const current = assignments.days[dayIndex].assignments[serie.index];
+        const shift = getShiftDefinition(shiftDefinitions, current.code);
+        if (
+          previousNightCount >= 2 &&
+          isWorkedAssignment(current, shiftDefinitions) &&
+          shift.startHour < 12
+        ) {
+          violations.push(`${serie.id} ${formatDateShort(current.date)} : reprise ${shift.startTime}`);
+          break;
+        }
+      }
+    });
+    return violations;
+  }
+
   function countWeekdayDispoIssues(
     assignments,
     weekdayDispoTarget = DEFAULT_WEEKDAY_DISPO_TARGET,
@@ -1988,14 +2023,10 @@
         hasShiftRole(shiftDefinitions, previous.plannedCode, "DN") &&
         hasShiftRole(shiftDefinitions, current.code, "M"),
     );
-    const dispoAfterMultiNightDn = checkTransition(assignments, (previous, current, beforePrevious) => {
-      return (
-        hasShiftRole(shiftDefinitions, previous.plannedCode, "DN") &&
-        beforePrevious &&
-        hasShiftRole(shiftDefinitions, beforePrevious.code, "N") &&
-        hasShiftRole(shiftDefinitions, current.code, "D")
-      );
-    });
+    const preNoonStartAfterMultiNightDn = checkPreNoonStartAfterMultiNightDn(
+      assignments,
+      shiftDefinitions,
+    );
     const weekdayDispoIssues = countWeekdayDispoIssues(
       assignments,
       requiredWeekdayDispos,
@@ -2085,7 +2116,7 @@
       "Descente après série de nuits",
       nightDnViolations.length === 0,
       nightDnViolations.length === 0
-        ? "Chaque série de 1 à 3 nuit(s) est suivie d'une descente."
+        ? "Chaque série d'au moins une nuit est suivie d'une descente."
         : `Exemple : ${nightDnViolations[0]}.`,
     );
     addRule(
@@ -2100,11 +2131,11 @@
       rules,
       "internal",
       "dispo-after-multi-night",
-      "Pas de Dispo après DN de plusieurs nuits",
-      dispoAfterMultiNightDn.length === 0,
-      dispoAfterMultiNightDn.length === 0
-        ? "Aucun cas détecté."
-        : `Exemple : ${dispoAfterMultiNightDn[0]}.`,
+      "Pas de reprise avant midi après DN de plusieurs nuits",
+      preNoonStartAfterMultiNightDn.length === 0,
+      preNoonStartAfterMultiNightDn.length === 0
+        ? "Aucune reprise avant midi après une descente de plusieurs nuits."
+        : `Exemple : ${preNoonStartAfterMultiNightDn[0]}.`,
     );
     addRule(
       rules,
@@ -2301,6 +2332,10 @@
     return [...new Set(labels)].join(" + ");
   }
 
+  function getScheduleTagPopoverText(sourceLabel, hoursLabel) {
+    return `${sourceLabel} · ${hoursLabel}`;
+  }
+
   function makeTag(assignment, workedHours = null, workSegments = [], shiftDefinitions = SHIFT_DEFINITIONS) {
     const shift = getShiftDefinition(shiftDefinitions, assignment.code) || SHIFT_DEFINITIONS.R;
     const sourceLabel = getWorkedHoursSourceLabel(assignment, workSegments, shiftDefinitions);
@@ -2311,6 +2346,8 @@
     tag.textContent = assignment.neutralizedDispo ? "R*" : shift.shortLabel;
     tag.dataset.hours = getWorkedHoursLabel(assignment, workedHours, shiftDefinitions);
     tag.dataset.source = sourceLabel;
+    tag.dataset.popover = getScheduleTagPopoverText(sourceLabel, tag.dataset.hours);
+    tag.dataset.floatingPopover = "true";
     tag.tabIndex = 0;
     tag.title = assignment.neutralizedDispo
       ? `Dispo neutralisée en repos effectif - ${tag.dataset.hours}`
@@ -2466,12 +2503,13 @@
     seriesHead.className = "series-head";
     seriesHead.textContent = "Série";
     headRow.appendChild(seriesHead);
-    simulation.weeks.forEach((week, weekIndex) => {
+    simulation.weeks.forEach((week) => {
       week.forEach((day) => {
         const th = document.createElement("th");
         th.className = "day-head";
         th.title = formatDateFull(day.date);
-        th.innerHTML = `<span>Sem. ${weekIndex + 1}</span><strong>${DAY_NAMES[day.date.getDay()]}</strong>`;
+        const header = getScheduleDayHeader(day.date);
+        th.innerHTML = `<span>${header.dateLabel}</span><strong>${header.dayLabel}</strong>`;
         headRow.appendChild(th);
       });
     });
@@ -2518,6 +2556,7 @@
 
   function renderStats(simulation) {
     const table = document.getElementById("statsTable");
+    const annualCounterBalance = getAnnualCounterBalance(simulation.stats);
     table.replaceChildren();
     table.innerHTML = `
       <thead>
@@ -2531,17 +2570,18 @@
       </thead>
       <tbody>
         ${simulation.stats
-          .map(
-            (row) => `
+          .map((row) => {
+            const rowBalance = annualCounterBalance[row.seriesId];
+            return `
               <tr>
                 <td><strong>${row.seriesId}</strong></td>
-                <td class="number">${formatHours(row.nightHoursYear)}</td>
-                <td class="number">${row.weekendWorkedYear}</td>
-                <td class="number">${formatHours(row.weekendHoursYear)}</td>
-                <td class="number">${formatHours(row.weekendHoursMonth)}</td>
+                ${renderAnnualCounterCell(rowBalance, "nightHoursYear", row.nightHoursYear)}
+                ${renderAnnualCounterCell(rowBalance, "weekendWorkedYear", row.weekendWorkedYear)}
+                ${renderAnnualCounterCell(rowBalance, "weekendHoursYear", row.weekendHoursYear)}
+                ${renderAnnualCounterCell(rowBalance, "weekendHoursMonth", row.weekendHoursMonth)}
               </tr>
-            `,
-          )
+            `;
+          })
           .join("")}
       </tbody>
     `;
@@ -2607,6 +2647,99 @@
     renderRules(simulation);
   }
 
+  function setupFloatingPopovers() {
+    const popover = document.createElement("div");
+    popover.id = "floatingPopover";
+    popover.className = "floating-popover";
+    popover.setAttribute("role", "tooltip");
+    popover.hidden = true;
+    document.body.appendChild(popover);
+
+    let activeTrigger = null;
+
+    function hidePopover(trigger = activeTrigger) {
+      if (trigger && activeTrigger !== trigger) {
+        return;
+      }
+      activeTrigger = null;
+      popover.hidden = true;
+      popover.textContent = "";
+    }
+
+    function positionPopover(trigger) {
+      popover.style.visibility = "hidden";
+      popover.hidden = false;
+      const triggerRect = trigger.getBoundingClientRect();
+      const popoverRect = popover.getBoundingClientRect();
+      const margin = 12;
+      const viewportWidth = globalScope.innerWidth || document.documentElement.clientWidth;
+      const viewportHeight = globalScope.innerHeight || document.documentElement.clientHeight;
+      const centeredLeft = triggerRect.left + triggerRect.width / 2 - popoverRect.width / 2;
+      const left = Math.min(
+        Math.max(margin, centeredLeft),
+        viewportWidth - popoverRect.width - margin,
+      );
+      let top = triggerRect.bottom + 8;
+      if (top + popoverRect.height + margin > viewportHeight) {
+        top = triggerRect.top - popoverRect.height - 8;
+      }
+      popover.style.left = `${Math.max(margin, left)}px`;
+      popover.style.top = `${Math.max(margin, top)}px`;
+      popover.style.visibility = "";
+    }
+
+    function showPopover(trigger) {
+      const text = trigger.dataset.popover;
+      if (!text) {
+        return;
+      }
+      activeTrigger = trigger;
+      popover.textContent = text;
+      positionPopover(trigger);
+    }
+
+    function getPopoverTrigger(target) {
+      return target?.closest?.('[data-floating-popover="true"][data-popover]');
+    }
+
+    document.addEventListener("pointerover", (event) => {
+      const trigger = getPopoverTrigger(event.target);
+      if (trigger) {
+        showPopover(trigger);
+      }
+    });
+
+    document.addEventListener("pointerout", (event) => {
+      const trigger = getPopoverTrigger(event.target);
+      if (trigger && !trigger.contains(event.relatedTarget)) {
+        hidePopover(trigger);
+      }
+    });
+
+    document.addEventListener("focusin", (event) => {
+      const trigger = getPopoverTrigger(event.target);
+      if (trigger) {
+        showPopover(trigger);
+      }
+    });
+
+    document.addEventListener("focusout", (event) => {
+      const trigger = getPopoverTrigger(event.target);
+      if (trigger) {
+        hidePopover(trigger);
+      }
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        hidePopover();
+      }
+    });
+
+    document.addEventListener("scroll", () => hidePopover(), true);
+    globalScope.addEventListener?.("resize", () => hidePopover());
+  }
+
   function setupDom() {
     const versionSelect = document.getElementById("versionSelect");
     const seriesCountInput = document.getElementById("seriesCountInput");
@@ -2645,6 +2778,10 @@
       shiftDefinitions,
     );
     let shiftEditorOpen = false;
+
+    startDate.min = START_DATE_STEP_BASE;
+    startDate.step = "7";
+    startDate.title = "Seuls les lundis sont acceptés.";
 
     function getCustomVersionById(versionId) {
       return customVersionLibrary.customVersions.find((version) => version.id === versionId) || null;
@@ -3165,6 +3302,7 @@
     legendActions.addEventListener("click", handleLegendAction);
     legendList.addEventListener("click", handleShiftAction);
     legendList.addEventListener("change", handleShiftFieldChange);
+    setupFloatingPopovers();
 
     loadVersionState(customVersionLibrary.selectedVersionId);
     refresh();
@@ -3186,6 +3324,7 @@
     createCustomVersion,
     createScheduleSettingsForVersion,
     deleteCustomVersion,
+    getAnnualCounterBalance,
     getCalendarWorkSegments,
     getCalendarWorkedHours,
     getWorkedHoursLabel,
@@ -3201,10 +3340,13 @@
     loadShiftDefinitions,
     normalizeShiftCode,
     normalizeScheduleSettings,
+    normalizeDisplaySettings,
     normalizeShiftDefinitions,
     getSeriesOffsetMax,
     getRuleStatusText,
     RULE_CATEGORIES,
+    getScheduleDayHeader,
+    getScheduleTagPopoverText,
     loadBaseVersionDefinitions,
     normalizeCycle,
     parseCycleInput,
@@ -3215,6 +3357,7 @@
     renameCustomVersion,
     removeShiftDefinition,
     replaceCycleCode,
+    renderAnnualCounterCell,
     saveCustomVersionLibrary,
     saveBaseVersionDefinitions,
     saveDisplaySettings,
