@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Simulateur horaires 10h</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Service intervention</p>
+          <h1>Simulateur horaires 10h</h1>
+        </div>
+        <div id="globalStatus" class="global-status" aria-live="polite"></div>
+      </header>
+
+      <section class="toolbar" aria-label="Paramètres de simulation">
+        <label class="field">
+          <span>Version</span>
+          <select id="versionSelect">
+            <option value="v7">7 semaines / 7 séries</option>
+            <option value="v8">8 semaines / 8 séries</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Date de départ</span>
+          <input id="startDate" type="date" value="2026-01-05" />
+        </label>
+
+        <label class="field">
+          <span>Dispo week-end</span>
+          <select id="weekendDispoSelect">
+            <option value="0">0 par jour</option>
+            <option value="1">1 par jour</option>
+            <option value="2">2 par jour</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Décalage séries</span>
+          <select id="seriesOffsetSelect"></select>
+        </label>
+
+        <label class="field field-cycle">
+          <span>Cycle</span>
+          <input id="cycleInput" type="text" spellcheck="false" aria-invalid="false" />
+        </label>
+
+        <div class="toolbar-actions">
+          <button id="resetCycle" class="secondary" type="button">Réinitialiser</button>
+        </div>
+      </section>
+
+      <section class="legend" aria-label="Légende">
+        <span><b class="tag tag-m">M</b> Matin 06:30-16:30</span>
+        <span><b class="tag tag-a">A</b> Après-midi 12:00-22:00</span>
+        <span><b class="tag tag-n">N</b> Nuit 21:00-07:00</span>
+        <span><b class="tag tag-dn">DN</b> Descente de nuit</span>
+        <span><b class="tag tag-r">R</b> Repos</span>
+        <span><b class="tag tag-d">D</b> Dispo 08:00-16:06</span>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Visualisation</p>
+            <h2 id="scheduleTitle">Horaire cyclique</h2>
+          </div>
+          <p id="scheduleMeta" class="meta"></p>
+        </div>
+        <div class="table-scroll">
+          <table class="schedule-table" id="scheduleTable"></table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Compteurs annuels</p>
+            <h2>Nuits et week-ends</h2>
+          </div>
+          <p id="statsMeta" class="meta"></p>
+        </div>
+        <div class="table-scroll">
+          <table class="stats-table" id="statsTable"></table>
+        </div>
+        <p id="statsNote" class="calculation-note"></p>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Contrôle</p>
+            <h2>Règles</h2>
+          </div>
+          <p class="meta">PJPol et règles internes</p>
+        </div>
+        <div id="rulesList" class="rules-list"></div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
