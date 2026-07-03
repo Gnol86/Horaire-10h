@@ -16,6 +16,59 @@
   const SCHEDULE_DAY_COLUMN_WIDTH = 64;
   const DEFAULT_VERSION_ID = "current";
   const CURRENT_VERSION_LABEL = "Horaire actuel";
+  const DEFAULT_WEEKDAY_DISPO_TARGET = 2;
+  const BALANCED_7_VERSION_ID = "v7-balanced";
+  const BALANCED_7_CYCLE = [
+    "M",
+    "D2",
+    "R",
+    "M",
+    "R",
+    "M",
+    "M",
+    "A",
+    "R",
+    "R",
+    "D1",
+    "N",
+    "N",
+    "N",
+    "DN",
+    "R",
+    "D1",
+    "N",
+    "DN",
+    "A",
+    "A",
+    "R",
+    "D1",
+    "A",
+    "R",
+    "M",
+    "D1",
+    "R",
+    "N",
+    "N",
+    "N",
+    "DN",
+    "A",
+    "R",
+    "D2",
+    "D2",
+    "M",
+    "M",
+    "D2",
+    "D1",
+    "D2",
+    "D1",
+    "D1",
+    "A",
+    "D2",
+    "A",
+    "D2",
+    "R",
+    "R",
+  ];
   const RULE_CATEGORIES = {
     pjpol: {
       id: "pjpol",
@@ -50,6 +103,15 @@
       weeks: 8,
       seriesCount: 8,
       cycle: ["M", "A", "N", "DN", "R", "R", "D", "D"],
+    },
+    [BALANCED_7_VERSION_ID]: {
+      id: BALANCED_7_VERSION_ID,
+      label: "10h - 7 Séries Équilibré",
+      weeks: 7,
+      seriesCount: 7,
+      seriesOffset: "7",
+      cycle: BALANCED_7_CYCLE,
+      weekdayDispoTarget: 2,
     },
   };
 
@@ -122,6 +184,34 @@
       breakEndTime: "12:30",
       isOff: false,
       className: "tag-d",
+    },
+  ];
+
+  const BALANCED_7_SHIFT_DEFINITION_LIST = [
+    ...DEFAULT_SHIFT_DEFINITION_LIST.filter((shift) => shift.code !== "D"),
+    {
+      code: "D1",
+      role: "D",
+      label: "Dispo matin",
+      color: "#2e7d54",
+      startTime: "08:00",
+      endTime: "14:00",
+      breakStartTime: "11:00",
+      breakEndTime: "11:30",
+      isOff: false,
+      className: "tag-d",
+    },
+    {
+      code: "D2",
+      role: "D",
+      label: "Dispo après-midi",
+      color: "#4f8f68",
+      startTime: "12:00",
+      endTime: "18:00",
+      breakStartTime: "15:00",
+      breakEndTime: "15:30",
+      isOff: false,
+      className: "tag-dynamic",
     },
   ];
 
@@ -347,7 +437,9 @@
     if (isCustomVersionId(scheduleSettings?.versionId)) {
       return loadShiftDefinitions(storage);
     }
-    return normalizeShiftDefinitions(DEFAULT_SHIFT_DEFINITION_LIST);
+    return getOfficialShiftDefinitions(
+      scheduleSettings?.versionId || scheduleSettings?.baseVersionId || getDefaultVersionId(),
+    );
   }
 
   function saveShiftDefinitions(shiftDefinitions, storage = globalScope.localStorage) {
@@ -488,6 +580,9 @@
 
   function getOfficialShiftDefinitions(versionId) {
     const definition = VERSION_DEFINITIONS[versionId] || VERSION_DEFINITIONS[getDefaultVersionId()];
+    if (definition.id === BALANCED_7_VERSION_ID) {
+      return normalizeShiftDefinitions(BALANCED_7_SHIFT_DEFINITION_LIST);
+    }
     return normalizeShiftDefinitions(definition.shiftDefinitions || DEFAULT_SHIFT_DEFINITION_LIST);
   }
 
@@ -511,6 +606,7 @@
       cycle,
       weekendDispoLimit: String(parseWeekendDispoLimit(input.weekendDispoLimit ?? fallback.weekendDispoLimit)),
       seriesOffset: String(parseSeriesOffset(input.seriesOffset ?? fallback.seriesOffset, cycle)),
+      weekdayDispoTarget: parseWeekdayDispoTarget(input.weekdayDispoTarget ?? fallback.weekdayDispoTarget),
       shiftDefinitions: shiftDefinitionsToList(shiftDefinitions),
     };
   }
@@ -1048,6 +1144,19 @@
     return [0, 1, 2].includes(limit) ? limit : 0;
   }
 
+  function parseWeekdayDispoTarget(value, fallback = DEFAULT_WEEKDAY_DISPO_TARGET) {
+    const target = Number.parseInt(value, 10);
+    const fallbackTarget = Number.parseInt(fallback, 10);
+    const safeFallback =
+      Number.isFinite(fallbackTarget) && fallbackTarget > 0
+        ? fallbackTarget
+        : DEFAULT_WEEKDAY_DISPO_TARGET;
+    if (!Number.isFinite(target)) {
+      return safeFallback;
+    }
+    return Math.min(Math.max(target, 1), MAX_SERIES_COUNT);
+  }
+
   function parseSeriesCount(value, fallback = 7) {
     const count = Number.parseInt(value, 10);
     const fallbackCount = Number.parseInt(fallback, 10);
@@ -1196,6 +1305,8 @@
     const parsedSeriesOffset = parseSeriesOffset(seriesOffset, cycle);
     return {
       holidaySet,
+      cycle,
+      seriesOffset: parsedSeriesOffset,
       shiftDefinitions,
       series,
       days: Array.from({ length: days }, (_, dayIndex) => {
@@ -1557,18 +1668,51 @@
     return "Échec";
   }
 
-  function checkNightFollowedByDn(assignments, shiftDefinitions = assignments.shiftDefinitions || SHIFT_DEFINITIONS) {
+  function getContinuousPlannedCode(assignments, seriesIndex, dayIndex) {
+    if (Array.isArray(assignments.cycle) && assignments.cycle.length > 0) {
+      const cycleIndex =
+        ((seriesIndex * assignments.seriesOffset + dayIndex) % assignments.cycle.length +
+          assignments.cycle.length) %
+        assignments.cycle.length;
+      return assignments.cycle[cycleIndex];
+    }
+    return assignments.days[dayIndex]?.assignments[seriesIndex]?.plannedCode || null;
+  }
+
+  function getContinuousDate(assignments, dayIndex) {
+    return assignments.days[dayIndex]?.date || addDays(assignments.days[0].date, dayIndex);
+  }
+
+  function checkNightSeriesFollowedByDn(assignments, shiftDefinitions = assignments.shiftDefinitions || SHIFT_DEFINITIONS) {
     const violations = [];
+    const horizonDays =
+      Array.isArray(assignments.cycle) && assignments.cycle.length > 0
+        ? assignments.cycle.length
+        : assignments.days.length;
     assignments.series.forEach((serie) => {
-      for (let dayIndex = 0; dayIndex < assignments.days.length - 1; dayIndex += 1) {
-        const current = assignments.days[dayIndex].assignments[serie.index];
-        const next = assignments.days[dayIndex + 1].assignments[serie.index];
+      for (let dayIndex = 0; dayIndex < horizonDays; dayIndex += 1) {
+        const previousCode = getContinuousPlannedCode(assignments, serie.index, dayIndex - 1);
+        const currentCode = getContinuousPlannedCode(assignments, serie.index, dayIndex);
+        const nextCode = getContinuousPlannedCode(assignments, serie.index, dayIndex + 1);
+
         if (
-          hasShiftRole(shiftDefinitions, current.code, "N") &&
-          !hasShiftRole(shiftDefinitions, next.code, "N") &&
-          !hasShiftRole(shiftDefinitions, next.plannedCode, "DN")
+          hasShiftRole(shiftDefinitions, currentCode, "DN") &&
+          !hasShiftRole(shiftDefinitions, previousCode, "N")
         ) {
-          violations.push(`${serie.id} ${formatDateShort(next.date)}`);
+          violations.push(
+            `DN sans nuit précédente : ${serie.id} ${formatDateShort(getContinuousDate(assignments, dayIndex))}`,
+          );
+          break;
+        }
+
+        if (
+          hasShiftRole(shiftDefinitions, currentCode, "N") &&
+          !hasShiftRole(shiftDefinitions, nextCode, "N") &&
+          !hasShiftRole(shiftDefinitions, nextCode, "DN")
+        ) {
+          violations.push(
+            `Descente manquante : ${serie.id} ${formatDateShort(getContinuousDate(assignments, dayIndex + 1))}`,
+          );
           break;
         }
       }
@@ -1593,7 +1737,12 @@
     return violations;
   }
 
-  function countWeekdayDispoIssues(assignments, shiftDefinitions = assignments.shiftDefinitions || SHIFT_DEFINITIONS) {
+  function countWeekdayDispoIssues(
+    assignments,
+    weekdayDispoTarget = DEFAULT_WEEKDAY_DISPO_TARGET,
+    shiftDefinitions = assignments.shiftDefinitions || SHIFT_DEFINITIONS,
+  ) {
+    const requiredDispos = parseWeekdayDispoTarget(weekdayDispoTarget);
     return assignments.days.filter((day) => {
       if (!isWorkingDay(day.date, assignments.holidaySet)) {
         return false;
@@ -1601,7 +1750,7 @@
       const dispoCount = day.assignments.filter((assignment) =>
         hasShiftRole(shiftDefinitions, assignment.code, "D"),
       ).length;
-      return dispoCount < 2;
+      return dispoCount < requiredDispos;
     });
   }
 
@@ -1669,8 +1818,10 @@
     eventsBySeries,
     weekendDispoLimit,
     shiftDefinitions = assignments.shiftDefinitions || SHIFT_DEFINITIONS,
+    weekdayDispoTarget = DEFAULT_WEEKDAY_DISPO_TARGET,
   ) {
     const rules = [];
+    const requiredWeekdayDispos = parseWeekdayDispoTarget(weekdayDispoTarget);
     const maxAverage = getWorst(stats, "averageWeeklyHours");
     const max24 = getWorst(stats, "max24Hours");
     const max168 = getWorst(stats, "max168Hours");
@@ -1679,7 +1830,7 @@
     const maxWeekendWorked = getWorst(stats, "weekendWorkedYear");
     const maxNights = getWorst(stats, "nightCount");
     const maxNightHours = getWorst(stats, "nightHoursYear");
-    const nightDnViolations = checkNightFollowedByDn(assignments, shiftDefinitions);
+    const nightDnViolations = checkNightSeriesFollowedByDn(assignments, shiftDefinitions);
     const morningAfterDn = checkTransition(
       assignments,
       (previous, current) =>
@@ -1694,7 +1845,11 @@
         hasShiftRole(shiftDefinitions, current.code, "D")
       );
     });
-    const weekdayDispoIssues = countWeekdayDispoIssues(assignments, shiftDefinitions);
+    const weekdayDispoIssues = countWeekdayDispoIssues(
+      assignments,
+      requiredWeekdayDispos,
+      shiftDefinitions,
+    );
     const morningCoverageIssues = countDailyCoverageIssues(assignments, "M", shiftDefinitions);
     const afternoonCoverageIssues = countDailyCoverageIssues(assignments, "A", shiftDefinitions);
     const nightCoverageIssues = countDailyCoverageIssues(assignments, "N", shiftDefinitions);
@@ -1766,10 +1921,10 @@
       rules,
       "internal",
       "night-dn",
-      "Nuit isolée suivie d'une DN",
+      "Descente après série de nuits",
       nightDnViolations.length === 0,
       nightDnViolations.length === 0
-        ? "Toutes les nuits isolées sont suivies d'une descente."
+        ? "Chaque série de 1 à 3 nuit(s) est suivie d'une descente."
         : `Exemple : ${nightDnViolations[0]}.`,
     );
     addRule(
@@ -1826,10 +1981,10 @@
       rules,
       "internal",
       "weekday-dispo",
-      "Au moins 2 Dispo par jour ouvrable",
+      `Au moins ${requiredWeekdayDispos} Dispo par jour ouvrable`,
       weekdayDispoIssues.length === 0,
       weekdayDispoIssues.length === 0
-        ? "Chaque jour ouvrable a au moins deux séries en Dispo."
+        ? `Chaque jour ouvrable a au moins ${requiredWeekdayDispos} série(s) en Dispo.`
         : `${weekdayDispoIssues.length} jour(s) ouvrable(s) sous le seuil.`,
     );
     addRule(
@@ -1887,14 +2042,17 @@
     const definition = getVersionDefinition(versionId, options.scheduleSettings);
     const shiftDefinitions = options.shiftDefinitions
       ? normalizeShiftDefinitions(options.shiftDefinitions)
-      : definition.shiftDefinitions
+      : definition.id === BALANCED_7_VERSION_ID || definition.shiftDefinitions
         ? getOfficialShiftDefinitions(definition.id)
         : SHIFT_DEFINITIONS;
+    const weekdayDispoTarget = parseWeekdayDispoTarget(definition.weekdayDispoTarget);
     const startDate = parseDateInput(options.startDate || "2026-01-05");
     const defaultCycle = getDefaultCycle(definition, shiftDefinitions);
     const cycle = normalizeCycle(options.cycle || defaultCycle.join(" "), defaultCycle, shiftDefinitions);
-    const weekendDispoLimit = parseWeekendDispoLimit(options.weekendDispoLimit);
-    const seriesOffset = parseSeriesOffset(options.seriesOffset, cycle);
+    const weekendDispoLimit = parseWeekendDispoLimit(
+      options.weekendDispoLimit ?? definition.weekendDispoLimit,
+    );
+    const seriesOffset = parseSeriesOffset(options.seriesOffset ?? definition.seriesOffset, cycle);
     const displayDays = definition.weeks * 7;
     const yearDays = new Date(startDate.getFullYear(), 1, 29).getMonth() === 1 ? 366 : 365;
     const displayAssignments = buildAssignments(
@@ -1917,7 +2075,14 @@
     );
     const annualEvents = buildEvents(annualAssignments, definition.seriesCount, shiftDefinitions);
     const stats = makeStats(annualAssignments, annualEvents, yearDays, shiftDefinitions);
-    const rules = buildRules(annualAssignments, stats, annualEvents, weekendDispoLimit, shiftDefinitions);
+    const rules = buildRules(
+      annualAssignments,
+      stats,
+      annualEvents,
+      weekendDispoLimit,
+      shiftDefinitions,
+      weekdayDispoTarget,
+    );
     const periodEnd = addDays(startDate, yearDays - 1);
     const completeDisplayCycles = Math.floor(yearDays / displayDays);
     return {

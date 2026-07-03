@@ -162,6 +162,22 @@ test("plus de 3 nuits consecutives reste interdit par la regle interne", () => {
   expectRuleStatus("N N N N R R R", "consecutive-nights", "fail");
 });
 
+test("une serie de nuits doit etre suivie d'une descente de nuit", () => {
+  expectRuleStatus("N DN R R R R R", "night-dn", "pass");
+  expectRuleStatus("N N R R R R R", "night-dn", "fail");
+  expectRuleStatus("N N DN R R R R", "night-dn", "pass");
+  expectRuleStatus("N N N R R R R", "night-dn", "fail");
+  expectRuleStatus("N N N DN R R R", "night-dn", "pass");
+});
+
+test("une descente de nuit ne peut suivre qu'une serie de nuits", () => {
+  const rule = getRule("M DN R R R R R", "night-dn");
+
+  assert.equal(rule.status, "fail");
+  assert.equal(rule.title, "Descente après série de nuits");
+  assert.match(rule.detail, /DN sans nuit précédente/);
+});
+
 test("le statut orange s'affiche comme OK avec derogation", () => {
   assert.equal(getRuleStatusText("warn"), "OK avec dérogation");
 });
@@ -819,4 +835,79 @@ test("la legende est en apercu ferme par defaut avant le mode edition", () => {
   ]);
   assert.equal(editor.cards.every((card) => card.showForm === true), true);
   assert.equal(editor.cards.every((card) => card.showDelete === true), true);
+});
+
+test("la version 7 series equilibree respecte les regles sans echec", () => {
+  const simulation = createSimulation("v7-balanced", {
+    startDate: "2026-01-05",
+  });
+  const failures = simulation.rules.filter((rule) => rule.status === "fail");
+  const warningIds = simulation.rules.filter((rule) => rule.status === "warn").map((rule) => rule.id);
+
+  assert.deepEqual(failures, []);
+  assert.deepEqual(warningIds, ["night-hours-cap"]);
+  assert.equal(simulation.version.seriesCount, 7);
+  assert.equal(simulation.version.weeks, 7);
+  assert.equal(simulation.seriesOffset, 7);
+});
+
+test("la version 7 series equilibree utilise deux Dispo courtes officielles", () => {
+  const settings = createScheduleSettingsForVersion("v7-balanced", SHIFT_DEFINITIONS);
+  const shifts = loadActiveShiftDefinitionsForSchedule(settings);
+  const simulation = createSimulation("v7-balanced", {
+    startDate: "2026-01-05",
+  });
+  const weekdayDispoRule = simulation.rules.find((rule) => rule.id === "weekday-dispo");
+
+  assert.equal(settings.cycle.split(" ").length, 49);
+  assert.equal(settings.seriesOffset, "7");
+  assert.equal(shifts.D, undefined);
+  assert.equal(shifts.D1.role, "D");
+  assert.equal(shifts.D1.startTime, "08:00");
+  assert.equal(shifts.D1.endTime, "14:00");
+  assert.equal(shifts.D1.breakStartTime, "11:00");
+  assert.equal(shifts.D1.breakEndTime, "11:30");
+  assert.equal(shifts.D1.unpaidBreakMinutes, 30);
+  assert.equal(shifts.D1.hours, 5.5);
+  assert.equal(shifts.D2.role, "D");
+  assert.equal(shifts.D2.startTime, "12:00");
+  assert.equal(shifts.D2.endTime, "18:00");
+  assert.equal(shifts.D2.breakStartTime, "15:00");
+  assert.equal(shifts.D2.breakEndTime, "15:30");
+  assert.equal(shifts.D2.unpaidBreakMinutes, 30);
+  assert.equal(shifts.D2.hours, 5.5);
+  assert.equal(weekdayDispoRule.status, "pass");
+  assert.equal(weekdayDispoRule.title, "Au moins 2 Dispo par jour ouvrable");
+});
+
+test("les versions existantes gardent leur cible de deux Dispo classiques", () => {
+  const current = createSimulation("v7", {
+    startDate: "2026-01-05",
+    weekendDispoLimit: "0",
+    seriesOffset: "1",
+    cycle: "M A N DN R R D",
+  });
+  const currentRule = current.rules.find((rule) => rule.id === "weekday-dispo");
+  const currentShifts = loadActiveShiftDefinitionsForSchedule(createScheduleSettingsForVersion("v7", SHIFT_DEFINITIONS));
+
+  assert.equal(currentRule.status, "fail");
+  assert.equal(currentRule.title, "Au moins 2 Dispo par jour ouvrable");
+  assert.match(currentRule.detail, /253 jour\(s\) ouvrable\(s\) sous le seuil/);
+  assert.equal(currentShifts.D.startTime, "08:00");
+  assert.equal(currentShifts.D.endTime, "16:06");
+});
+
+test("les compteurs annuels de la version equilibree restent proches entre series", () => {
+  const simulation = createSimulation("v7-balanced", {
+    startDate: "2026-01-05",
+  });
+  const spread = (values) => Math.max(...values) - Math.min(...values);
+
+  assert.equal(spread(simulation.stats.map((row) => row.weekendWorkedYear)), 3);
+  assert.equal(spread(simulation.stats.map((row) => row.weekendHoursYear)), 61);
+  assert.equal(spread(simulation.stats.map((row) => row.nightCount)), 5);
+  assert.equal(spread(simulation.stats.map((row) => row.nightHoursYear)), 40);
+  assert.equal(spread(simulation.stats.map((row) => row.totalHours)), 32);
+  assert.equal(Math.max(...simulation.stats.map((row) => row.averageWeeklyHours)) < 38, true);
+  assert.equal(Math.max(...simulation.stats.map((row) => row.weekendWorkedYear)) <= 28, true);
 });
