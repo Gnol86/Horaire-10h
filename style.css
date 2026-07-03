@@ -107,7 +107,7 @@ h2 {
 .toolbar {
   display: grid;
   grid-template-columns:
-    minmax(190px, 1fr) minmax(180px, 0.8fr) minmax(150px, 0.7fr)
+    minmax(190px, 1fr) minmax(120px, 0.55fr) minmax(150px, 0.7fr)
     minmax(150px, 0.7fr) minmax(300px, 2fr) auto;
   gap: 14px;
   align-items: end;
@@ -159,7 +159,33 @@ input[aria-invalid="true"]:focus {
 
 .toolbar-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.version-name-editor {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(220px, 360px) auto;
+  gap: 10px;
+  align-items: end;
+  padding-top: 2px;
+}
+
+.version-name-editor[hidden] {
+  display: none;
+}
+
+.version-name-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.visualization-controls {
+  display: flex;
+  max-width: 190px;
+  margin: 12px 14px 12px;
 }
 
 button {
@@ -179,24 +205,142 @@ button.secondary {
   color: var(--text);
 }
 
+button.danger {
+  border-color: rgba(181, 56, 56, 0.35);
+  background: #fff4f4;
+  color: var(--fail);
+}
+
 button:hover {
   filter: brightness(1.05);
 }
 
+button:disabled {
+  cursor: not-allowed;
+  filter: none;
+  opacity: 0.55;
+}
+
 .legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 16px;
+  display: grid;
+  gap: 12px;
   margin-top: 14px;
-  padding: 12px 14px;
+  padding: 14px;
   color: var(--muted);
   font-size: 0.9rem;
 }
 
-.legend span {
-  display: inline-flex;
+.legend-heading,
+.shift-summary {
+  display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.legend-actions,
+.shift-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.shift-actions:empty {
+  display: none;
+}
+
+.legend-list {
+  display: grid;
+  gap: 8px;
+}
+
+.legend-list[data-mode="preview"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+
+.shift-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 10px;
+}
+
+.shift-card[data-mode="preview"] {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.shift-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+
+.shift-identity div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.shift-identity strong {
+  color: var(--strong);
+  font-size: 0.94rem;
+  line-height: 1.2;
+}
+
+.shift-identity span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.2;
+}
+
+.shift-form {
+  display: grid;
+  grid-template-columns:
+    minmax(130px, 1.25fr) minmax(76px, 0.5fr) minmax(70px, 0.45fr)
+    minmax(88px, 0.58fr) minmax(88px, 0.58fr) minmax(98px, 0.62fr)
+    minmax(98px, 0.62fr) minmax(110px, 0.7fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.shift-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.shift-field span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.shift-field input {
+  height: 36px;
+  padding: 0 8px;
+}
+
+.shift-field input[type="checkbox"] {
+  width: 24px;
+  height: 24px;
+  align-self: center;
+}
+
+.legend-status {
+  min-height: 18px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.legend-status[data-status="error"] {
+  color: var(--fail);
+  font-weight: 700;
 }
 
 .panel {
@@ -251,18 +395,35 @@ tbody tr:last-child td {
 }
 
 .schedule-table {
+  --schedule-day-column-width: 64px;
+  --schedule-series-column-width: 92px;
+  --schedule-table-width: calc(
+    var(--schedule-series-column-width) + var(--schedule-day-count, 49) *
+      var(--schedule-day-column-width)
+  );
   border-collapse: collapse;
-  min-width: 3220px;
   table-layout: fixed;
-  width: 100%;
+  width: var(--schedule-table-width);
+  min-width: var(--schedule-table-width);
+}
+
+.schedule-table .series-col {
+  width: var(--schedule-series-column-width);
+}
+
+.schedule-table .day-col {
+  width: var(--schedule-day-column-width);
 }
 
 .schedule-table th,
 .schedule-table td {
+  box-sizing: border-box;
   border-bottom: 1px solid var(--line);
   border-right: 1px solid var(--line);
   height: 42px;
-  min-width: 54px;
+  width: var(--schedule-day-column-width);
+  min-width: var(--schedule-day-column-width);
+  max-width: var(--schedule-day-column-width);
   padding: 6px;
   text-align: center;
   vertical-align: middle;
@@ -294,8 +455,9 @@ tbody tr:last-child td {
 .schedule-table td.series-name {
   position: sticky;
   left: 0;
-  min-width: 92px;
-  width: 92px;
+  width: var(--schedule-series-column-width);
+  min-width: var(--schedule-series-column-width);
+  max-width: var(--schedule-series-column-width);
 }
 
 .schedule-table .series-head {
@@ -377,28 +539,38 @@ tbody tr:last-child td {
 }
 
 .tag-m {
-  background: var(--m);
+  background: var(--shift-color, var(--m));
+  color: var(--shift-text-color, #fff);
 }
 
 .tag-a {
-  background: var(--a);
+  background: var(--shift-color, var(--a));
+  color: var(--shift-text-color, #fff);
 }
 
 .tag-n {
-  background: var(--n);
+  background: var(--shift-color, var(--n));
+  color: var(--shift-text-color, #fff);
 }
 
 .tag-dn {
-  background: var(--dn);
+  background: var(--shift-color, var(--dn));
+  color: var(--shift-text-color, #fff);
 }
 
 .tag-r {
-  background: var(--r);
-  color: #2f2d27;
+  background: var(--shift-color, var(--r));
+  color: var(--shift-text-color, #2f2d27);
 }
 
 .tag-d {
-  background: var(--d);
+  background: var(--shift-color, var(--d));
+  color: var(--shift-text-color, #fff);
+}
+
+.tag-dynamic {
+  background: var(--shift-color, #6f6b77);
+  color: var(--shift-text-color, #fffdf7);
 }
 
 .tag-neutralized {
@@ -547,7 +719,9 @@ tbody tr:last-child td {
 
 @media (max-width: 980px) {
   .page-header,
-  .section-heading {
+  .section-heading,
+  .legend-heading,
+  .shift-summary {
     align-items: stretch;
     flex-direction: column;
   }
@@ -559,6 +733,10 @@ tbody tr:last-child td {
 
   .toolbar {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .shift-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .field-cycle,
@@ -580,6 +758,26 @@ tbody tr:last-child td {
   .toolbar-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
+  }
+
+  .version-name-editor {
+    grid-template-columns: 1fr;
+  }
+
+  .version-name-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .legend-actions,
+  .shift-actions,
+  .shift-form {
+    grid-template-columns: 1fr;
+  }
+
+  .legend-actions,
+  .shift-actions {
+    display: grid;
   }
 
   .rule-grid {

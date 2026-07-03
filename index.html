@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Simulateur horaires 10h</title>
+    <title>Simulateur horaires</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
@@ -11,7 +11,7 @@
       <header class="page-header">
         <div>
           <p class="eyebrow">Service intervention</p>
-          <h1>Simulateur horaires 10h</h1>
+          <h1>Simulateur horaires</h1>
         </div>
         <div id="globalStatus" class="global-status" aria-live="polite"></div>
       </header>
@@ -20,14 +20,15 @@
         <label class="field">
           <span>Version</span>
           <select id="versionSelect">
-            <option value="v7">7 semaines / 7 séries</option>
-            <option value="v8">8 semaines / 8 séries</option>
+            <option value="current">Horaire actuel</option>
+            <option value="v7">10h - 7 Séries Nul</option>
+            <option value="v8">10h - 8 Séries</option>
           </select>
         </label>
 
         <label class="field">
-          <span>Date de départ</span>
-          <input id="startDate" type="date" value="2026-01-05" />
+          <span>Nombre de séries</span>
+          <input id="seriesCountInput" type="number" min="1" max="12" step="1" value="7" inputmode="numeric" />
         </label>
 
         <label class="field">
@@ -50,17 +51,32 @@
         </label>
 
         <div class="toolbar-actions">
-          <button id="resetCycle" class="secondary" type="button">Réinitialiser</button>
+          <button id="duplicateVersion" class="secondary" type="button">Dupliquer</button>
+          <button id="renameVersion" class="secondary" type="button">Renommer</button>
+          <button id="deleteVersion" class="danger" type="button">Supprimer</button>
+        </div>
+
+        <div id="versionNameEditor" class="version-name-editor" hidden>
+          <label class="field">
+            <span>Nom de la version</span>
+            <input id="versionNameInput" type="text" maxlength="40" autocomplete="off" />
+          </label>
+          <div class="version-name-actions">
+            <button id="saveVersionName" type="button">OK</button>
+            <button id="cancelVersionName" class="secondary" type="button">Annuler</button>
+          </div>
         </div>
       </section>
 
-      <section class="legend" aria-label="Légende">
-        <span><b class="tag tag-m">M</b> Matin 06:30-16:30</span>
-        <span><b class="tag tag-a">A</b> Après-midi 12:00-22:00</span>
-        <span><b class="tag tag-n">N</b> Nuit 21:00-07:00</span>
-        <span><b class="tag tag-dn">DN</b> Descente de nuit</span>
-        <span><b class="tag tag-r">R</b> Repos</span>
-        <span><b class="tag tag-d">D</b> Dispo 08:00-16:06</span>
+      <section class="legend" aria-label="Pauses">
+        <div class="legend-heading">
+          <div>
+            <h2>Pauses</h2>
+          </div>
+          <div id="legendActions" class="legend-actions"></div>
+        </div>
+        <div id="legendList" class="legend-list"></div>
+        <p id="shiftSettingsStatus" class="legend-status" aria-live="polite"></p>
       </section>
 
       <section class="panel">
@@ -70,6 +86,12 @@
             <h2 id="scheduleTitle">Horaire cyclique</h2>
           </div>
           <p id="scheduleMeta" class="meta"></p>
+        </div>
+        <div class="visualization-controls">
+          <label class="field">
+            <span>Date de départ</span>
+            <input id="startDate" type="date" value="2026-01-05" />
+          </label>
         </div>
         <div class="table-scroll">
           <table class="schedule-table" id="scheduleTable"></table>

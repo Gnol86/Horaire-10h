@@ -1,7 +1,42 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { SHIFT_DEFINITIONS, createSimulation, getRuleStatusText, getWeekendHoursForShift } = require("./app.js");
+const {
+  SHIFT_DEFINITIONS,
+  DEFAULT_SHIFT_DEFINITION_LIST,
+  CUSTOM_VERSION_ID,
+  DEFAULT_VERSION_ID,
+  BASE_VERSION_STORAGE_KEY,
+  CUSTOM_VERSIONS_STORAGE_KEY,
+  DISPLAY_SETTINGS_STORAGE_KEY,
+  createSimulation,
+  createCustomScheduleSettings,
+  createCustomVersion,
+  createScheduleSettingsForVersion,
+  deleteCustomVersion,
+  getRuleStatusText,
+  getVersionActionsViewModel,
+  loadBaseVersionDefinitions,
+  loadActiveShiftDefinitionsForSchedule,
+  loadCustomVersionLibrary,
+  loadDisplaySettings,
+  loadScheduleSettings,
+  renameCustomVersion,
+  promoteCurrentCustomVersionLibrary,
+  saveBaseVersionDefinitions,
+  saveDisplaySettings,
+  saveCustomVersionLibrary,
+  saveScheduleSettings,
+  SCHEDULE_SETTINGS_STORAGE_KEY,
+  SHIFT_SETTINGS_STORAGE_KEY,
+  getWeekendHoursForShift,
+  getShiftSettingsViewModel,
+  getScheduleTableSizing,
+  loadShiftDefinitions,
+  normalizeShiftDefinitions,
+  parseCycleInput,
+  removeShiftDefinition,
+} = require("./app.js");
 
 function getRule(cycle, ruleId) {
   const simulation = createSimulation("v7", {
@@ -163,4 +198,625 @@ test("les controles PJPol sont categorises separement des regles internes", () =
     assert.equal(rules[ruleId]?.category, "internal", `${ruleId} should be an internal rule`);
   });
   assert.equal(Object.keys(rules).length, pjpolRules.length + internalRules.length);
+});
+
+test("le cycle valide les codes contre les pauses dynamiques", () => {
+  const shiftDefinitions = normalizeShiftDefinitions([
+    ...DEFAULT_SHIFT_DEFINITION_LIST,
+    {
+      code: "X",
+      label: "Renfort",
+      color: "#4f46e5",
+      startTime: "09:00",
+      endTime: "17:00",
+      unpaidBreakMinutes: 30,
+      isOff: false,
+    },
+  ]);
+
+  assert.equal(parseCycleInput("X R", shiftDefinitions).valid, true);
+  assert.deepEqual(parseCycleInput("X R").invalidTokens, ["X"]);
+});
+
+test("un code personnalise peut alimenter la simulation", () => {
+  const shiftDefinitions = normalizeShiftDefinitions([
+    ...DEFAULT_SHIFT_DEFINITION_LIST,
+    {
+      code: "X",
+      label: "Renfort",
+      color: "#4f46e5",
+      startTime: "09:00",
+      endTime: "17:00",
+      unpaidBreakMinutes: 30,
+      isOff: false,
+    },
+  ]);
+  const simulation = createSimulation("v7", {
+    startDate: "2026-01-05",
+    weekendDispoLimit: "0",
+    seriesOffset: "1",
+    cycle: "X R R R R R R",
+    shiftDefinitions,
+  });
+  const firstSeries = simulation.stats.find((row) => row.seriesId === "S01");
+
+  assert.equal(firstSeries.totalHours, 397.5);
+  assert.ok(Math.abs(firstSeries.averageWeeklyHours - 7.623287671232877) < 0.0000001);
+});
+
+test("une journee sans horaire est comptee comme non travaillee", () => {
+  const shiftDefinitions = normalizeShiftDefinitions([
+    ...DEFAULT_SHIFT_DEFINITION_LIST,
+    {
+      code: "OFF",
+      label: "Sans horaire",
+      color: "#b8b4aa",
+      isOff: true,
+    },
+  ]);
+  const simulation = createSimulation("v7", {
+    startDate: "2026-01-05",
+    weekendDispoLimit: "0",
+    seriesOffset: "1",
+    cycle: "OFF",
+    shiftDefinitions,
+  });
+  const firstSeries = simulation.stats.find((row) => row.seriesId === "S01");
+
+  assert.equal(firstSeries.totalHours, 0);
+  assert.equal(firstSeries.maxConsecutiveWorkDays, 0);
+});
+
+test("les minutes de pause non payee sont deduites des heures payees", () => {
+  const shiftDefinitions = normalizeShiftDefinitions([
+    {
+      code: "P",
+      label: "Pause payee partielle",
+      color: "#0f766e",
+      startTime: "08:00",
+      endTime: "18:00",
+      unpaidBreakMinutes: 90,
+      isOff: false,
+    },
+    {
+      code: "R",
+      label: "Repos",
+      color: "#d8d5cc",
+      isOff: true,
+    },
+  ]);
+  const simulation = createSimulation("v7", {
+    startDate: "2026-01-05",
+    weekendDispoLimit: "0",
+    seriesOffset: "1",
+    cycle: "P R R R R R R",
+    shiftDefinitions,
+  });
+  const firstSeries = simulation.stats.find((row) => row.seriesId === "S01");
+
+  assert.equal(firstSeries.totalHours, 450.5);
+});
+
+test("modifier une heure normalisee ne revient pas a l'ancienne valeur derivee", () => {
+  const shiftDefinitions = normalizeShiftDefinitions([
+    {
+      code: "P",
+      label: "Pause modifiable",
+      color: "#0f766e",
+      startTime: "08:00",
+      endTime: "18:00",
+      breakStartTime: "12:00",
+      breakEndTime: "12:30",
+      isOff: false,
+    },
+  ]);
+  const updatedDefinitions = normalizeShiftDefinitions({
+    ...shiftDefinitions,
+    P: {
+      ...shiftDefinitions.P,
+      startTime: "09:00",
+    },
+  });
+
+  assert.equal(updatedDefinitions.P.startTime, "09:00");
+  assert.equal(updatedDefinitions.P.startHour, 9);
+  assert.equal(updatedDefinitions.P.hours, 8.5);
+});
+
+test("saisir seulement le debut de pause conserve la valeur sans appliquer de pause incomplete", () => {
+  const shiftDefinitions = normalizeShiftDefinitions([
+    {
+      code: "P",
+      label: "Pause modifiable",
+      color: "#0f766e",
+      startTime: "08:00",
+      endTime: "18:00",
+      breakStartTime: "12:00",
+      breakEndTime: "12:30",
+      isOff: false,
+    },
+  ]);
+  const updatedDefinitions = normalizeShiftDefinitions({
+    ...shiftDefinitions,
+    P: {
+      ...shiftDefinitions.P,
+      breakStartTime: "13:00",
+      breakEndTime: "",
+    },
+  });
+
+  assert.equal(updatedDefinitions.P.breakStartTime, "13:00");
+  assert.equal(updatedDefinitions.P.breakEndTime, "");
+  assert.equal(updatedDefinitions.P.unpaidBreakMinutes, 0);
+  assert.equal(updatedDefinitions.P.hours, 10);
+});
+
+test("une pause non payee placee en nuit est deduite des heures de nuit", () => {
+  const shiftDefinitions = normalizeShiftDefinitions([
+    {
+      code: "P",
+      label: "Nuit avec pause",
+      color: "#343a66",
+      startTime: "21:00",
+      endTime: "07:00",
+      breakStartTime: "23:00",
+      breakEndTime: "23:30",
+      isOff: false,
+    },
+    {
+      code: "R",
+      label: "Repos",
+      color: "#d8d5cc",
+      isOff: true,
+    },
+  ]);
+  const simulation = createSimulation("v7", {
+    startDate: "2026-01-05",
+    weekendDispoLimit: "0",
+    seriesOffset: "1",
+    cycle: "P R R R R R R",
+    shiftDefinitions,
+  });
+  const firstSeries = simulation.stats.find((row) => row.seriesId === "S01");
+
+  assert.equal(firstSeries.totalHours, 503.5);
+  assert.equal(firstSeries.nightHoursYear, 397.5);
+});
+
+test("une pause non payee placee le week-end est deduite des heures week-end", () => {
+  const shiftDefinitions = normalizeShiftDefinitions([
+    {
+      code: "P",
+      label: "Vendredi nuit",
+      color: "#343a66",
+      startTime: "21:00",
+      endTime: "07:00",
+      breakStartTime: "00:30",
+      breakEndTime: "01:00",
+      isOff: false,
+    },
+    {
+      code: "R",
+      label: "Repos",
+      color: "#d8d5cc",
+      isOff: true,
+    },
+  ]);
+  const simulation = createSimulation("v7", {
+    startDate: "2026-01-09",
+    weekendDispoLimit: "0",
+    seriesOffset: "1",
+    cycle: "P R R R R R R",
+    shiftDefinitions,
+  });
+  const firstSeries = simulation.stats.find((row) => row.seriesId === "S01");
+
+  assert.equal(firstSeries.weekendWorkedYear, 53);
+  assert.equal(firstSeries.weekendHoursYear, 344.5);
+});
+
+test("la suppression est bloquee quand le code est encore utilise dans le cycle", () => {
+  const shiftDefinitions = normalizeShiftDefinitions([
+    ...DEFAULT_SHIFT_DEFINITION_LIST,
+    {
+      code: "X",
+      label: "Renfort",
+      color: "#4f46e5",
+      startTime: "09:00",
+      endTime: "17:00",
+      unpaidBreakMinutes: 0,
+      isOff: false,
+    },
+  ]);
+  const blocked = removeShiftDefinition(shiftDefinitions, "X", "M X R");
+  const removed = removeShiftDefinition(shiftDefinitions, "X", "M R");
+
+  assert.equal(blocked.removed, false);
+  assert.match(blocked.message, /encore utilisee/i);
+  assert.ok(blocked.shiftDefinitions.X);
+  assert.equal(removed.removed, true);
+  assert.equal(removed.shiftDefinitions.X, undefined);
+});
+
+test("le chargement localStorage revient aux pauses par defaut si les donnees sont invalides", () => {
+  const storage = {
+    getItem() {
+      return "{invalid";
+    },
+  };
+  const shiftDefinitions = loadShiftDefinitions(storage);
+
+  assert.equal(shiftDefinitions.M.label, "Matin");
+  assert.equal(shiftDefinitions.N.startTime, "21:00");
+});
+
+test("la version officielle selectionnee est restauree apres rechargement", () => {
+  const values = new Map();
+  const storage = {
+    getItem(key) {
+      return values.get(key) || null;
+    },
+    setItem(key, value) {
+      values.set(key, value);
+    },
+  };
+  const settings = createScheduleSettingsForVersion("v8", SHIFT_DEFINITIONS);
+
+  saveScheduleSettings(settings, storage);
+  const loaded = loadScheduleSettings(storage, SHIFT_DEFINITIONS);
+
+  assert.equal(values.has(SCHEDULE_SETTINGS_STORAGE_KEY), true);
+  assert.equal(loaded.versionId, "v8");
+  assert.equal(loaded.baseVersionId, "v8");
+  assert.equal(loaded.cycle, "M A N DN R R D D");
+});
+
+test("horaire actuel est la version de base par defaut", () => {
+  const library = loadCustomVersionLibrary();
+  const settings = createScheduleSettingsForVersion(DEFAULT_VERSION_ID, SHIFT_DEFINITIONS);
+
+  assert.equal(library.selectedVersionId, DEFAULT_VERSION_ID);
+  assert.equal(library.customVersions.length, 0);
+  assert.equal(settings.versionId, DEFAULT_VERSION_ID);
+  assert.equal(settings.baseVersionId, DEFAULT_VERSION_ID);
+  assert.equal(settings.cycle, "M A N DN R R D");
+});
+
+test("modifier un champ horaire hors version cree une version custom persistable", () => {
+  const official = createScheduleSettingsForVersion("v8", SHIFT_DEFINITIONS);
+  const custom = createCustomScheduleSettings(official, {
+    weekendDispoLimit: "2",
+    seriesCount: "9",
+    seriesOffset: "3",
+    cycle: "M A N DN R D R D",
+  });
+
+  assert.equal(custom.versionId, CUSTOM_VERSION_ID);
+  assert.equal(custom.baseVersionId, "v8");
+  assert.equal(custom.startDate, undefined);
+  assert.equal(custom.weekendDispoLimit, "2");
+  assert.equal(custom.seriesCount, "9");
+  assert.equal(custom.seriesOffset, "3");
+  assert.equal(custom.cycle, "M A N DN R D R D");
+
+  const values = new Map();
+  const storage = {
+    getItem(key) {
+      return values.get(key) || null;
+    },
+    setItem(key, value) {
+      values.set(key, value);
+    },
+  };
+  saveScheduleSettings(custom, storage);
+  const loaded = loadScheduleSettings(storage, SHIFT_DEFINITIONS);
+
+  assert.deepEqual(loaded, custom);
+});
+
+test("un custom horaire actuel est promu en version de base persistable", () => {
+  const official = createScheduleSettingsForVersion("v7", SHIFT_DEFINITIONS);
+  const shiftDefinitions = normalizeShiftDefinitions([
+    ...DEFAULT_SHIFT_DEFINITION_LIST,
+    {
+      code: "X",
+      label: "Renfort actuel",
+      color: "#4f46e5",
+      startTime: "09:00",
+      endTime: "17:30",
+      isOff: false,
+    },
+  ]);
+  const custom = createCustomVersion({
+    id: "custom-current",
+    name: "horaire actuel",
+    scheduleSettings: {
+      ...official,
+      weekendDispoLimit: "2",
+      seriesCount: "9",
+      seriesOffset: "3",
+      cycle: "M X R R R R R R R",
+    },
+    shiftDefinitions,
+  });
+  const promoted = promoteCurrentCustomVersionLibrary({
+    selectedVersionId: custom.id,
+    customVersions: [custom],
+  });
+  const values = new Map();
+  const storage = {
+    getItem(key) {
+      return values.get(key) || null;
+    },
+    setItem(key, value) {
+      values.set(key, value);
+    },
+  };
+
+  saveBaseVersionDefinitions({ [DEFAULT_VERSION_ID]: promoted.versionDefinition }, storage);
+  const loadedDefinitions = loadBaseVersionDefinitions(storage);
+  const storedPayload = JSON.parse(values.get(BASE_VERSION_STORAGE_KEY));
+
+  assert.equal(promoted.library.selectedVersionId, DEFAULT_VERSION_ID);
+  assert.equal(promoted.library.customVersions.length, 0);
+  assert.equal(promoted.versionDefinition.id, DEFAULT_VERSION_ID);
+  assert.equal(promoted.versionDefinition.label, "Horaire actuel");
+  assert.equal(promoted.versionDefinition.seriesCount, 9);
+  assert.equal(promoted.versionDefinition.weeks, 9);
+  assert.equal(promoted.versionDefinition.weekendDispoLimit, "2");
+  assert.equal(promoted.versionDefinition.seriesOffset, "3");
+  assert.deepEqual(promoted.versionDefinition.cycle, ["M", "X", "R", "R", "R", "R", "R", "R", "R"]);
+  assert.equal(promoted.versionDefinition.shiftDefinitions.find((shift) => shift.code === "X").label, "Renfort actuel");
+  assert.equal(storedPayload[DEFAULT_VERSION_ID].label, "Horaire actuel");
+  assert.equal(loadedDefinitions[DEFAULT_VERSION_ID].shiftDefinitions.find((shift) => shift.code === "X").label, "Renfort actuel");
+});
+
+test("la date de depart est un reglage d'affichage separe des versions", () => {
+  const official = createScheduleSettingsForVersion("v7", SHIFT_DEFINITIONS);
+  const custom = createCustomVersion({
+    id: "custom-date",
+    name: "Sans date version",
+    scheduleSettings: { ...official, startDate: "2026-02-02" },
+    shiftDefinitions: SHIFT_DEFINITIONS,
+  });
+  const values = new Map();
+  const storage = {
+    getItem(key) {
+      return values.get(key) || null;
+    },
+    setItem(key, value) {
+      values.set(key, value);
+    },
+  };
+
+  saveCustomVersionLibrary(
+    { selectedVersionId: custom.id, customVersions: [custom] },
+    storage,
+  );
+  saveDisplaySettings({ startDate: "2026-02-02" }, storage);
+
+  const loadedLibrary = loadCustomVersionLibrary(storage);
+  const loadedDisplay = loadDisplaySettings(storage);
+  const storedCustomPayload = JSON.parse(values.get(CUSTOM_VERSIONS_STORAGE_KEY));
+
+  assert.equal(storedCustomPayload.customVersions[0].scheduleSettings.startDate, undefined);
+  assert.equal(loadedLibrary.customVersions[0].scheduleSettings.startDate, undefined);
+  assert.equal(values.has(DISPLAY_SETTINGS_STORAGE_KEY), true);
+  assert.equal(loadedDisplay.startDate, "2026-02-02");
+});
+
+test("un horaire custom peut choisir un nombre de series qui fixe aussi les semaines", () => {
+  const official = createScheduleSettingsForVersion("v7", SHIFT_DEFINITIONS);
+  const custom = createCustomScheduleSettings(official, {
+    seriesCount: "10",
+  });
+  const simulation = createSimulation(CUSTOM_VERSION_ID, {
+    scheduleSettings: custom,
+    startDate: "2026-01-05",
+    weekendDispoLimit: custom.weekendDispoLimit,
+    seriesOffset: custom.seriesOffset,
+    cycle: custom.cycle,
+  });
+
+  assert.equal(simulation.version.seriesCount, 10);
+  assert.equal(simulation.version.weeks, 10);
+  assert.equal(simulation.series.length, 10);
+  assert.equal(simulation.weeks.length, 10);
+});
+
+test("la largeur du tableau suit le nombre de semaines avec des cellules fixes", () => {
+  const sevenWeeks = getScheduleTableSizing(7);
+  const twelveWeeks = getScheduleTableSizing(12);
+
+  assert.equal(sevenWeeks.dayColumnWidth, twelveWeeks.dayColumnWidth);
+  assert.equal(sevenWeeks.seriesColumnWidth, twelveWeeks.seriesColumnWidth);
+  assert.equal(sevenWeeks.dayCount, 49);
+  assert.equal(twelveWeeks.dayCount, 84);
+  assert.equal(sevenWeeks.tableWidth, 92 + 49 * 64);
+  assert.equal(twelveWeeks.tableWidth, 92 + 84 * 64);
+});
+
+test("plusieurs versions custom conservent leurs horaires et pauses separement", () => {
+  const official = createScheduleSettingsForVersion("v7", SHIFT_DEFINITIONS);
+  const shiftsWithRenfort = normalizeShiftDefinitions([
+    ...DEFAULT_SHIFT_DEFINITION_LIST,
+    {
+      code: "X",
+      label: "Renfort",
+      color: "#4f46e5",
+      startTime: "09:00",
+      endTime: "17:00",
+      isOff: false,
+    },
+  ]);
+  const first = createCustomVersion({
+    id: "custom-a",
+    name: "Equipe A",
+    scheduleSettings: { ...official, seriesCount: "9", cycle: "M X R R R R R" },
+    shiftDefinitions: shiftsWithRenfort,
+  });
+  const second = createCustomVersion({
+    id: "custom-b",
+    name: "Equipe B",
+    scheduleSettings: { ...official, seriesCount: "6", cycle: "M A N DN R R D" },
+    shiftDefinitions: SHIFT_DEFINITIONS,
+  });
+  const values = new Map();
+  const storage = {
+    getItem(key) {
+      return values.get(key) || null;
+    },
+    setItem(key, value) {
+      values.set(key, value);
+    },
+  };
+
+  saveCustomVersionLibrary(
+    {
+      selectedVersionId: "custom-b",
+      customVersions: [first, second],
+    },
+    storage,
+  );
+  const loaded = loadCustomVersionLibrary(storage);
+
+  assert.equal(values.has(CUSTOM_VERSIONS_STORAGE_KEY), true);
+  assert.equal(loaded.selectedVersionId, "custom-b");
+  assert.equal(loaded.customVersions.length, 2);
+  assert.equal(loaded.customVersions[0].name, "Equipe A");
+  assert.equal(loaded.customVersions[0].scheduleSettings.seriesCount, "9");
+  assert.equal(loaded.customVersions[0].shiftDefinitions.X.label, "Renfort");
+  assert.equal(loaded.customVersions[1].name, "Equipe B");
+  assert.equal(loaded.customVersions[1].shiftDefinitions.X, undefined);
+});
+
+test("renommer et supprimer une version custom garde les versions officielles intactes", () => {
+  const custom = createCustomVersion({
+    id: "custom-a",
+    name: "Ancien nom",
+    scheduleSettings: createScheduleSettingsForVersion("v7", SHIFT_DEFINITIONS),
+    shiftDefinitions: SHIFT_DEFINITIONS,
+  });
+  const renamed = renameCustomVersion(
+    { selectedVersionId: custom.id, customVersions: [custom] },
+    custom.id,
+    "Cycle brigade",
+  );
+  const deleted = deleteCustomVersion(renamed, custom.id);
+
+  assert.equal(renamed.customVersions[0].name, "Cycle brigade");
+  assert.equal(deleted.customVersions.length, 0);
+  assert.equal(deleted.selectedVersionId, "v7");
+});
+
+test("l'editeur de nom de version ne s'ouvre que pour une version custom", () => {
+  assert.deepEqual(getVersionActionsViewModel(false, true), {
+    canRename: false,
+    canDelete: false,
+    renameEditorOpen: false,
+  });
+  assert.deepEqual(getVersionActionsViewModel(true, true), {
+    canRename: true,
+    canDelete: true,
+    renameEditorOpen: true,
+  });
+});
+
+test("l'ancien custom unique est migre en premiere version custom nommee", () => {
+  const oldCustom = createCustomScheduleSettings(createScheduleSettingsForVersion("v7", SHIFT_DEFINITIONS), {
+    seriesCount: "9",
+  });
+  const customShiftDefinitions = normalizeShiftDefinitions([
+    ...DEFAULT_SHIFT_DEFINITION_LIST,
+    {
+      code: "X",
+      label: "Renfort migre",
+      color: "#4f46e5",
+      startTime: "09:00",
+      endTime: "17:00",
+      isOff: false,
+    },
+  ]);
+  const values = new Map([
+    [SCHEDULE_SETTINGS_STORAGE_KEY, JSON.stringify(oldCustom)],
+    [SHIFT_SETTINGS_STORAGE_KEY, JSON.stringify(Object.values(customShiftDefinitions))],
+  ]);
+  const storage = {
+    getItem(key) {
+      return values.get(key) || null;
+    },
+  };
+  const loaded = loadCustomVersionLibrary(storage);
+
+  assert.equal(loaded.customVersions.length, 1);
+  assert.equal(loaded.selectedVersionId, loaded.customVersions[0].id);
+  assert.equal(loaded.customVersions[0].name, "Custom");
+  assert.equal(loaded.customVersions[0].scheduleSettings.seriesCount, "9");
+  assert.equal(loaded.customVersions[0].shiftDefinitions.X.label, "Renfort migre");
+});
+
+test("modifier une pause cree aussi une version custom pour garder les versions officielles immuables", () => {
+  const official = createScheduleSettingsForVersion("v7", SHIFT_DEFINITIONS);
+  const custom = createCustomScheduleSettings(official);
+
+  assert.equal(custom.versionId, CUSTOM_VERSION_ID);
+  assert.equal(custom.baseVersionId, "v7");
+  assert.equal(custom.cycle, official.cycle);
+});
+
+test("les versions officielles gardent les pauses par defaut meme si des pauses custom sont stockees", () => {
+  const customShiftDefinitions = normalizeShiftDefinitions([
+    ...DEFAULT_SHIFT_DEFINITION_LIST,
+    {
+      code: "X",
+      label: "Renfort custom",
+      color: "#4f46e5",
+      startTime: "09:00",
+      endTime: "17:00",
+      isOff: false,
+    },
+  ]);
+  const values = new Map([
+    [
+      "horaire10h.shiftDefinitions.v1",
+      JSON.stringify(Object.values(customShiftDefinitions)),
+    ],
+  ]);
+  const storage = {
+    getItem(key) {
+      return values.get(key) || null;
+    },
+  };
+  const officialShifts = loadActiveShiftDefinitionsForSchedule(
+    createScheduleSettingsForVersion("v7", SHIFT_DEFINITIONS),
+    storage,
+  );
+  const customShifts = loadActiveShiftDefinitionsForSchedule(
+    createCustomScheduleSettings(createScheduleSettingsForVersion("v7", SHIFT_DEFINITIONS)),
+    storage,
+  );
+
+  assert.equal(officialShifts.X, undefined);
+  assert.equal(officialShifts.M.label, "Matin");
+  assert.equal(customShifts.X.label, "Renfort custom");
+});
+
+test("la legende est en apercu ferme par defaut avant le mode edition", () => {
+  const shiftDefinitions = normalizeShiftDefinitions(DEFAULT_SHIFT_DEFINITION_LIST);
+  const preview = getShiftSettingsViewModel(shiftDefinitions, false);
+  const editor = getShiftSettingsViewModel(shiftDefinitions, true);
+
+  assert.equal(preview.mode, "preview");
+  assert.deepEqual(preview.headerActions.map((action) => action.label), ["Modifier"]);
+  assert.equal(preview.cards.length, 6);
+  assert.equal(preview.cards.every((card) => card.showForm === false), true);
+  assert.equal(preview.cards.every((card) => card.showDelete === false), true);
+
+  assert.equal(editor.mode, "edit");
+  assert.deepEqual(editor.headerActions.map((action) => action.label), [
+    "Ajouter",
+    "Fermer",
+  ]);
+  assert.equal(editor.cards.every((card) => card.showForm === true), true);
+  assert.equal(editor.cards.every((card) => card.showDelete === true), true);
 });
