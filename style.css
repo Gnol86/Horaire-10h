@@ -440,9 +440,48 @@ tbody tr:last-child td {
 
 .rules-list {
   display: grid;
+  gap: 16px;
+  padding: 16px;
+}
+
+.rule-group {
+  display: grid;
+  gap: 10px;
+}
+
+.rule-group + .rule-group {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+.rule-group-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: end;
+}
+
+.rule-group-heading h3,
+.rule-group-heading p {
+  margin: 0;
+}
+
+.rule-group-heading h3 {
+  color: var(--strong);
+  font-size: 1.02rem;
+  line-height: 1.25;
+}
+
+.rule-group-heading p {
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.rule-grid {
+  display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  padding: 16px;
 }
 
 .rule-card {
@@ -543,7 +582,7 @@ tbody tr:last-child td {
     grid-template-columns: 1fr 1fr;
   }
 
-  .rules-list {
+  .rule-grid {
     grid-template-columns: 1fr;
   }
 

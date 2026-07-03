@@ -2,7 +2,26 @@
   "use strict";
 
   const HOUR = 60 * 60 * 1000;
-  const FREE_WEEKEND_THRESHOLD = 18;
+  const STANDARD_MAX_WORKED_WEEKENDS = 28;
+  const EXTENDED_MAX_WORKED_WEEKENDS = 34;
+  const STANDARD_MAX_NIGHT_HOURS = 400;
+  const EXTENDED_MAX_NIGHT_HOURS = 480;
+  const STANDARD_MAX_NIGHT_COUNT = 70;
+  const EXTENDED_MAX_NIGHT_COUNT = 85;
+  const MAX_CONSECUTIVE_WORK_DAYS = 10;
+  const MAX_WORK_DAYS_BEFORE_SINGLE_REST = 9;
+  const RULE_CATEGORIES = {
+    pjpol: {
+      id: "pjpol",
+      title: "Règles PJPol",
+      detail: "Statut officiel et seuils avec dérogation éventuelle.",
+    },
+    internal: {
+      id: "internal",
+      title: "Règles internes",
+      detail: "Contraintes d'organisation propres au cycle du service.",
+    },
+  };
 
   const VERSION_DEFINITIONS = {
     v7: {
@@ -334,9 +353,21 @@
       end,
       dayIndex: assignment.dayIndex,
       hours: (end.getTime() - start.getTime()) / HOUR,
-      nightHours: assignment.code === "N" ? 8 : 0,
+      nightHours: getNightHoursForShift(start, end),
       weekendHours: getWeekendHoursForShift(start, end),
     };
+  }
+
+  function getNightHoursForShift(start, end) {
+    let cursorDay = addDays(start, -1);
+    let nightHours = 0;
+    while (cursorDay < end) {
+      const nightStart = atHour(cursorDay, 22);
+      const nightEnd = atHour(cursorDay, 30);
+      nightHours += getOverlapHours(nightStart.getTime(), nightEnd.getTime(), { start, end });
+      cursorDay = addDays(cursorDay, 1);
+    }
+    return Math.round(nightHours * 10) / 10;
   }
 
   function getCalendarWorkedHours(assignments, seriesIndex, dayIndex) {
@@ -463,6 +494,82 @@
     return max;
   }
 
+  function isWorkedAssignment(assignment) {
+    return SHIFT_DEFINITIONS[assignment.code].startHour != null;
+  }
+
+  function analyzeConsecutiveWorkRest(assignments) {
+    const summary = {
+      maxConsecutiveWorkDays: 0,
+      twoRestViolations: [],
+      singleRestViolations: [],
+    };
+
+    assignments.series.forEach((serie) => {
+      let dayIndex = 0;
+      while (dayIndex < assignments.days.length) {
+        const assignment = assignments.days[dayIndex].assignments[serie.index];
+        if (!isWorkedAssignment(assignment)) {
+          dayIndex += 1;
+          continue;
+        }
+
+        const runStartIndex = dayIndex;
+        while (
+          dayIndex < assignments.days.length &&
+          isWorkedAssignment(assignments.days[dayIndex].assignments[serie.index])
+        ) {
+          dayIndex += 1;
+        }
+
+        const runLength = dayIndex - runStartIndex;
+        const runStartDate = assignments.days[runStartIndex].date;
+        summary.maxConsecutiveWorkDays = Math.max(summary.maxConsecutiveWorkDays, runLength);
+
+        let restCount = 0;
+        let restIndex = dayIndex;
+        while (
+          restIndex < assignments.days.length &&
+          !isWorkedAssignment(assignments.days[restIndex].assignments[serie.index]) &&
+          restCount < 2
+        ) {
+          restCount += 1;
+          restIndex += 1;
+        }
+
+        const resumesAfterRest =
+          restIndex < assignments.days.length &&
+          isWorkedAssignment(assignments.days[restIndex].assignments[serie.index]);
+
+        if (runLength > MAX_CONSECUTIVE_WORK_DAYS) {
+          summary.twoRestViolations.push(
+            `${serie.id} ${formatDateShort(runStartDate)} : ${runLength} jours consécutifs`,
+          );
+        } else if (
+          runLength === MAX_CONSECUTIVE_WORK_DAYS &&
+          restCount < 2 &&
+          resumesAfterRest
+        ) {
+          summary.twoRestViolations.push(
+            `${serie.id} ${formatDateShort(runStartDate)} : ${restCount} jour(s) de repos après 10 jours`,
+          );
+        }
+
+        if (
+          runLength > MAX_WORK_DAYS_BEFORE_SINGLE_REST &&
+          restCount === 1 &&
+          resumesAfterRest
+        ) {
+          summary.singleRestViolations.push(
+            `${serie.id} ${formatDateShort(runStartDate)} : ${runLength} jours puis 1 repos`,
+          );
+        }
+      }
+    });
+
+    return summary;
+  }
+
   function makeStats(assignments, eventsBySeries, horizonDays) {
     const weeks = horizonDays / 7;
     return assignments.series.map((serie) => {
@@ -477,7 +584,7 @@
       const maxConsecutiveWorkDays = countMaxConsecutiveDays(
         assignments,
         serie.index,
-        (assignment) => SHIFT_DEFINITIONS[assignment.code].startHour != null,
+        isWorkedAssignment,
       );
       const maxConsecutiveNights = countMaxConsecutiveDays(
         assignments,
@@ -506,44 +613,24 @@
     return stats.reduce((max, row) => Math.max(max, row[key]), 0);
   }
 
-  function getLowest(stats, key) {
-    return stats.reduce((min, row) => Math.min(min, row[key]), Number.POSITIVE_INFINITY);
-  }
-
-  function addRule(rules, id, title, passed, detail, warning) {
+  function addRule(rules, category, id, title, passed, detail, warning) {
     rules.push({
       id,
+      category,
       title,
       status: passed ? "pass" : warning ? "warn" : "fail",
       detail,
     });
   }
 
-  function getTwoMonthNightMax(eventsBySeries, startYear) {
-    const periods = [
-      [0, 1],
-      [2, 3],
-      [4, 5],
-      [6, 7],
-      [8, 9],
-      [10, 11],
-    ];
-    let max = 0;
-    eventsBySeries.forEach((events) => {
-      periods.forEach(([startMonth, endMonth]) => {
-        const count = events.filter((event) => {
-          const date = event.start;
-          return (
-            event.code === "N" &&
-            date.getFullYear() === startYear &&
-            date.getMonth() >= startMonth &&
-            date.getMonth() <= endMonth
-          );
-        }).length;
-        max = Math.max(max, count);
-      });
-    });
-    return max;
+  function getRuleStatusText(status) {
+    if (status === "pass") {
+      return "OK";
+    }
+    if (status === "warn") {
+      return "OK avec dérogation";
+    }
+    return "Échec";
   }
 
   function checkNightFollowedByDn(assignments) {
@@ -636,16 +723,16 @@
     );
   }
 
-  function buildRules(assignments, stats, eventsBySeries, startDate, weekendDispoLimit) {
+  function buildRules(assignments, stats, eventsBySeries, weekendDispoLimit) {
     const rules = [];
     const maxAverage = getWorst(stats, "averageWeeklyHours");
     const max24 = getWorst(stats, "max24Hours");
     const max168 = getWorst(stats, "max168Hours");
-    const maxConsecutiveWork = getWorst(stats, "maxConsecutiveWorkDays");
+    const consecutiveWorkRest = analyzeConsecutiveWorkRest(assignments);
     const maxConsecutiveNights = getWorst(stats, "maxConsecutiveNights");
-    const minWeekendFree = getLowest(stats, "weekendFreeYear");
+    const maxWeekendWorked = getWorst(stats, "weekendWorkedYear");
     const maxNights = getWorst(stats, "nightCount");
-    const maxTwoMonthNights = getTwoMonthNightMax(eventsBySeries, startDate.getFullYear());
+    const maxNightHours = getWorst(stats, "nightHoursYear");
     const nightDnViolations = checkNightFollowedByDn(assignments);
     const morningAfterDn = checkTransition(
       assignments,
@@ -667,6 +754,7 @@
 
     addRule(
       rules,
+      "pjpol",
       "average-weekly",
       "Moyenne 38 h/semaine",
       maxAverage <= 38,
@@ -674,6 +762,7 @@
     );
     addRule(
       rules,
+      "pjpol",
       "daily-limit",
       "Maximum 12 h par 24 h",
       max24 <= 12,
@@ -681,6 +770,7 @@
     );
     addRule(
       rules,
+      "pjpol",
       "weekly-limit",
       "Maximum 50 h sur 7 jours",
       max168 <= 50,
@@ -688,6 +778,7 @@
     );
     addRule(
       rules,
+      "pjpol",
       "daily-rest",
       "Repos de 11 h entre prestations",
       checkRestViolations(eventsBySeries).length === 0,
@@ -697,13 +788,27 @@
     );
     addRule(
       rules,
+      "pjpol",
       "consecutive-work",
-      "Maximum 10 jours de travail consécutifs",
-      maxConsecutiveWork <= 10,
-      `Maximum observé : ${maxConsecutiveWork} jours.`,
+      "Maximum 10 jours puis 2 repos",
+      consecutiveWorkRest.twoRestViolations.length === 0,
+      consecutiveWorkRest.twoRestViolations.length === 0
+        ? `Maximum observé : ${consecutiveWorkRest.maxConsecutiveWorkDays} jours, avec 2 repos après 10 jours.`
+        : `Première alerte : ${consecutiveWorkRest.twoRestViolations[0]}.`,
     );
     addRule(
       rules,
+      "pjpol",
+      "single-rest-work-limit",
+      "Maximum 9 jours avant 1 repos",
+      consecutiveWorkRest.singleRestViolations.length === 0,
+      consecutiveWorkRest.singleRestViolations.length === 0
+        ? "Aucune reprise après un seul repos ne suit plus de 9 jours travaillés."
+        : `Première alerte : ${consecutiveWorkRest.singleRestViolations[0]}.`,
+    );
+    addRule(
+      rules,
+      "internal",
       "consecutive-nights",
       "Maximum 3 nuits consécutives",
       maxConsecutiveNights <= 3,
@@ -711,6 +816,7 @@
     );
     addRule(
       rules,
+      "internal",
       "night-dn",
       "Nuit isolée suivie d'une DN",
       nightDnViolations.length === 0,
@@ -720,6 +826,7 @@
     );
     addRule(
       rules,
+      "internal",
       "morning-after-dn",
       "Pas de Matin après DN",
       morningAfterDn.length === 0,
@@ -727,6 +834,7 @@
     );
     addRule(
       rules,
+      "internal",
       "dispo-after-multi-night",
       "Pas de Dispo après DN de plusieurs nuits",
       dispoAfterMultiNightDn.length === 0,
@@ -736,6 +844,7 @@
     );
     addRule(
       rules,
+      "internal",
       "daily-morning-coverage",
       "Un Matin par jour",
       morningCoverageIssues.length === 0,
@@ -743,6 +852,7 @@
     );
     addRule(
       rules,
+      "internal",
       "daily-afternoon-coverage",
       "Un Après-midi par jour",
       afternoonCoverageIssues.length === 0,
@@ -750,6 +860,7 @@
     );
     addRule(
       rules,
+      "internal",
       "daily-night-coverage",
       "Une Nuit par jour",
       nightCoverageIssues.length === 0,
@@ -757,6 +868,7 @@
     );
     addRule(
       rules,
+      "internal",
       "dispo-non-working",
       weekendDispoLimit === 0 ? "Pas de Dispo week-end ou jour férié" : "Dispo week-end selon réglage",
       nonWorkingDispoSummary.overLimitDays === 0,
@@ -764,6 +876,7 @@
     );
     addRule(
       rules,
+      "internal",
       "weekday-dispo",
       "Au moins 2 Dispo par jour ouvrable",
       weekdayDispoIssues.length === 0,
@@ -773,17 +886,30 @@
     );
     addRule(
       rules,
+      "pjpol",
       "weekend-free",
-      "Week-ends libres annuels",
-      minWeekendFree >= FREE_WEEKEND_THRESHOLD,
-      `Minimum observé : ${minWeekendFree} week-end(s) libre(s), seuil réduit ${FREE_WEEKEND_THRESHOLD}/an.`,
+      "Maximum 28 week-ends travaillés",
+      maxWeekendWorked <= STANDARD_MAX_WORKED_WEEKENDS,
+      `Maximum observé : ${maxWeekendWorked} week-end(s) travaillé(s). Limite standard PJPol : ${STANDARD_MAX_WORKED_WEEKENDS}/an, extensible à ${EXTENDED_MAX_WORKED_WEEKENDS}/an selon accord/concertation.`,
+      maxWeekendWorked <= EXTENDED_MAX_WORKED_WEEKENDS,
     );
     addRule(
       rules,
-      "night-caps",
-      "Plafonds de nuit",
-      maxNights <= 55 && maxTwoMonthNights <= 10,
-      `Maximum annuel : ${maxNights} nuit(s). Maximum sur 2 mois : ${maxTwoMonthNights}.`,
+      "pjpol",
+      "night-hours-cap",
+      "Maximum 400 h de nuit",
+      maxNightHours <= STANDARD_MAX_NIGHT_HOURS,
+      `Maximum annuel observé : ${formatHours(maxNightHours)} h de nuit. Limite standard PJPol : ${STANDARD_MAX_NIGHT_HOURS} h/an, extensible à ${EXTENDED_MAX_NIGHT_HOURS} h/an selon accord/concertation.`,
+      maxNightHours <= EXTENDED_MAX_NIGHT_HOURS,
+    );
+    addRule(
+      rules,
+      "pjpol",
+      "night-count-cap",
+      "Maximum 70 nuits par an",
+      maxNights <= STANDARD_MAX_NIGHT_COUNT,
+      `Maximum annuel observé : ${maxNights} nuit(s). Limite standard PJPol : ${STANDARD_MAX_NIGHT_COUNT} nuit(s)/an, extensible à ${EXTENDED_MAX_NIGHT_COUNT} nuit(s)/an selon accord/concertation.`,
+      maxNights <= EXTENDED_MAX_NIGHT_COUNT,
     );
     return rules;
   }
@@ -835,7 +961,7 @@
     );
     const annualEvents = buildEvents(annualAssignments, definition.seriesCount);
     const stats = makeStats(annualAssignments, annualEvents, yearDays);
-    const rules = buildRules(annualAssignments, stats, annualEvents, startDate, weekendDispoLimit);
+    const rules = buildRules(annualAssignments, stats, annualEvents, weekendDispoLimit);
     const periodEnd = addDays(startDate, yearDays - 1);
     const completeDisplayCycles = Math.floor(yearDays / displayDays);
     return {
@@ -986,19 +1112,39 @@
   function renderRules(simulation) {
     const list = document.getElementById("rulesList");
     list.replaceChildren();
-    simulation.rules.forEach((rule) => {
-      const card = document.createElement("article");
-      card.className = "rule-card";
-      card.dataset.status = rule.status;
-      const statusText = rule.status === "pass" ? "OK" : rule.status === "warn" ? "Info" : "Échec";
-      card.innerHTML = `
-        <div class="rule-topline">
-          <h3>${rule.title}</h3>
-          <span class="status-pill status-${rule.status}">${statusText}</span>
+    Object.values(RULE_CATEGORIES).forEach((category) => {
+      const categoryRules = simulation.rules.filter((rule) => rule.category === category.id);
+      if (categoryRules.length === 0) {
+        return;
+      }
+      const group = document.createElement("section");
+      group.className = "rule-group";
+      group.dataset.category = category.id;
+      group.innerHTML = `
+        <div class="rule-group-heading">
+          <div>
+            <h3>${category.title}</h3>
+            <p>${category.detail}</p>
+          </div>
         </div>
-        <p>${rule.detail}</p>
       `;
-      list.appendChild(card);
+      const grid = document.createElement("div");
+      grid.className = "rule-grid";
+      categoryRules.forEach((rule) => {
+        const card = document.createElement("article");
+        card.className = "rule-card";
+        card.dataset.status = rule.status;
+        card.innerHTML = `
+          <div class="rule-topline">
+            <h3>${rule.title}</h3>
+            <span class="status-pill status-${rule.status}">${getRuleStatusText(rule.status)}</span>
+          </div>
+          <p>${rule.detail}</p>
+        `;
+        grid.appendChild(card);
+      });
+      group.appendChild(grid);
+      list.appendChild(group);
     });
   }
 
@@ -1006,7 +1152,7 @@
     const failures = simulation.rules.filter((rule) => rule.status === "fail").length;
     const warnings = simulation.rules.filter((rule) => rule.status === "warn").length;
     const globalStatus = document.getElementById("globalStatus");
-    globalStatus.innerHTML = `<strong>${failures} échec${failures > 1 ? "s" : ""}</strong>${warnings} info${warnings > 1 ? "s" : ""}`;
+    globalStatus.innerHTML = `<strong>${failures} échec${failures > 1 ? "s" : ""}</strong>${warnings} dérogation${warnings > 1 ? "s" : ""}`;
     document.getElementById("scheduleTitle").textContent = simulation.version.label;
     document.getElementById("scheduleMeta").textContent =
       `${simulation.series.length} séries, ${simulation.weeks.length} semaines`;
@@ -1107,8 +1253,11 @@
     getCalendarWorkSegments,
     getCalendarWorkedHours,
     getWorkedHoursLabel,
+    getNightHoursForShift,
     getWeekendHoursForShift,
     getSeriesOffsetMax,
+    getRuleStatusText,
+    RULE_CATEGORIES,
     normalizeCycle,
     parseCycleInput,
     parseSeriesOffset,

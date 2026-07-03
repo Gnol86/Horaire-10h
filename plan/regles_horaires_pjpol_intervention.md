@@ -12,7 +12,8 @@ Pour chaque membre du personnel planifié, vérifier au minimum :
 - maximum **50 heures de travail par période de 7 jours calendrier consécutifs** ;
 - minimum **11 heures consécutives de repos** entre deux prestations ;
 - maximum **10 jours de travail consécutifs** avant 2 jours de repos ininterrompus ;
-- le respect des règles relatives aux **week-ends libres** ;
+- maximum **9 jours de travail consécutifs** si la série n'est coupée que par un seul jour de repos ;
+- le respect des règles relatives aux **week-ends travaillés et libres** ;
 - le respect des plafonds de **prestations de nuit** ;
 - les règles particulières pour les membres **enceintes** ou dispensés de prestations de nuit ;
 - les règles relatives au **repas**, au **rappel**, à la disponibilité et aux dérogations.
@@ -152,27 +153,43 @@ Repos : 8 heures. Ce n’est pas une planification ordinaire acceptable si elle 
 
 Après **10 jours de travail consécutifs**, le membre du personnel a droit à **2 jours de repos ininterrompus**.
 
+Cela signifie qu'une série de **10 jours travaillés** ne peut pas être suivie d'un seul jour de repos puis d'une reprise du travail.
+
+Si la coupure prévue n'est que d'**un seul jour de repos**, la série précédente ne peut donc pas dépasser **9 jours de travail consécutifs**.
+
 ### Ce que le planificateur doit faire
 
 - Compter les jours effectivement prestés, y compris week-ends, rappels et prestations particulières.
 - Bloquer automatiquement 2 jours de repos après 10 jours prestés consécutivement.
+- Signaler les enchaînements du type `10 jours prestés + 1 repos + reprise`, même si la limite brute de 10 jours n'est pas dépassée.
 - Éviter de couper artificiellement une série de jours prestés par une récupération trop courte ou mal positionnée.
 
 ---
 
-## 10. Week-ends libres
+## 10. Week-ends travaillés et libres
 
-### Règle générale
+### Règle
 
-Le PJPol prévoit un droit à des week-ends libres. La règle couramment reprise est au moins **24 week-ends libres par an**.
+Le membre du personnel peut travailler maximum **28 week-ends par an**.
 
-Ce nombre peut être réduit à **18 week-ends libres par an** de commun accord, selon les spécificités du corps ou du service et dans le respect des règles de concertation applicables.
+De commun accord, l'autorité compétente et le membre du personnel peuvent décider de prester plus de week-ends par an.
+
+Après concertation au sein du comité de concertation concerné, le maximum de 28 week-ends peut être fixé, si nécessaire, jusqu'à **34 week-ends par an**, en fonction des nécessités du service.
+
+En pratique, le seuil standard de 28 week-ends travaillés correspond à au moins **24 week-ends libres par an**. Le seuil porté à 34 correspond à au moins **18 week-ends libres par an**.
+
+Dans le simulateur :
+
+- jusqu'à 28 week-ends travaillés : **OK** ;
+- de 29 à 34 week-ends travaillés : **OK avec dérogation** ;
+- au-delà de 34 week-ends travaillés : **Échec**.
 
 ### Ce que le planificateur doit faire
 
-- Tenir un compteur annuel des week-ends libres par membre du personnel.
-- Vérifier si le service applique le seuil de 24 ou un régime réduit validé à 18.
-- Équilibrer les week-ends prestés entre les membres de l’équipe.
+- Tenir un compteur annuel des week-ends travaillés et libres par membre du personnel.
+- Appliquer par défaut le plafond de 28 week-ends travaillés.
+- Ne passer au plafond de 34 que si le régime est validé selon les règles d'accord et de concertation applicables.
+- Équilibrer les week-ends prestés entre les membres de l'équipe.
 - Ne pas raisonner uniquement par mois : le compteur est annuel, mais les enchaînements doivent aussi rester raisonnables.
 
 ---
@@ -183,7 +200,9 @@ Ce nombre peut être réduit à **18 week-ends libres par an** de commun accord,
 
 Après **3 week-ends consécutifs prestés**, le membre du personnel a droit à au moins **60 heures de repos ininterrompu**, week-end compris.
 
-Une organisation différente peut exister de commun accord dans les limites prévues.
+De commun accord, l'autorité compétente et le membre du personnel peuvent décider de prester plus de week-ends à la suite.
+
+Après concertation au sein du comité de concertation concerné, le maximum peut être fixé, si nécessaire, à **4 week-ends consécutifs**, en fonction des nécessités de service.
 
 ### Ce que le planificateur doit faire
 
@@ -205,26 +224,45 @@ Une prestation de nuit est une prestation effective effectuée entre :
 
 Une prestation diurne prolongée de moins de 2 heures après 22:00 n’est pas nécessairement comptabilisée comme prestation de nuit pour les plafonds applicables.
 
-### Règle générale
+Dans le simulateur, les heures de nuit sont calculées par intersection réelle entre l'horaire de la pause et la fenêtre **22:00 - 06:00**. Une pause Nuit interne de **21:00 à 07:00** compte donc **8 heures de nuit**, même si elle dure 10 heures au total.
+
+### Règle générale PJPol
 
 Le régime de base prévoit un maximum de :
 
-- **55 prestations de nuit par an** ;
-- **10 prestations de nuit par période de référence**.
+- **400 heures de prestations de nuit par an** ;
+- **70 nuits par an**.
 
-Dans certaines situations, le maximum de 10 nuits par période de référence peut être porté à **12** par l’autorité compétente après concertation.
+De commun accord, l'autorité compétente et le membre du personnel peuvent décider de prester plus de 400 heures de nuit ou plus de 70 nuits par an, sans dépasser :
 
-Pour certains services effectués à l’intérieur, les plafonds peuvent être portés à :
+- **480 heures de prestations de nuit par an** ;
+- **85 nuits par an**.
 
-- **60 prestations de nuit par an** ;
-- **15 prestations de nuit par période de référence**.
+Ces maxima peuvent aussi être fixés jusqu'à 480 heures et 85 nuits par an en fonction des nécessités de service, après concertation au sein du comité de concertation concerné.
+
+Le PJPol prévoit également maximum **7 nuits consécutives**, après lesquelles le membre du personnel a droit à **2 nuits libres consécutives**.
+
+Dans le simulateur :
+
+- jusqu'à 400 heures de nuit et 70 nuits par an : **OK** ;
+- de 401 à 480 heures de nuit, ou de 71 à 85 nuits par an : **OK avec dérogation** sur la règle concernée ;
+- au-delà de 480 heures de nuit ou de 85 nuits par an : **Échec** sur la règle concernée.
+
+### Règle interne plus stricte
+
+Pour le cycle de ce simulateur, la règle interne reste :
+
+- maximum **3 nuits consécutives**.
 
 ### Ce que le planificateur doit faire
 
-- Tenir un compteur des nuits par période de référence et par année.
+- Tenir un compteur des heures de nuit et du nombre de nuits par année.
 - Vérifier le régime applicable au service intervention concerné.
-- Ne pas dépasser 10 nuits par période de référence sauf décision ou régime autorisé.
-- Éviter les enchaînements excessifs de nuits même si le plafond numérique n’est pas atteint.
+- Contrôler séparément le plafond de 400 heures de nuit et le plafond de 70 nuits par an.
+- Appliquer par défaut ces deux plafonds standards.
+- Ne passer au plafond de 480 heures et 85 nuits que si le régime est autorisé.
+- Respecter la règle interne de maximum 3 nuits consécutives tant qu'elle est applicable au service.
+- Éviter les enchaînements excessifs de nuits même si le plafond numérique n'est pas atteint.
 - Contrôler les repos après les nuits.
 
 ---
@@ -355,9 +393,10 @@ Avant de publier l’horaire, vérifier pour chaque membre :
 - [ ] Aucune période glissante de 7 jours ne dépasse 50 h.
 - [ ] Chaque reprise respecte 11 h de repos, sauf exception valable.
 - [ ] Aucun membre ne dépasse 10 jours de travail consécutifs sans 2 jours de repos.
-- [ ] Les week-ends libres annuels sont correctement suivis.
+- [ ] Aucun membre ne reprend après un seul jour de repos si la série précédente dépassait 9 jours de travail.
+- [ ] Le plafond annuel de week-ends travaillés est correctement suivi.
 - [ ] Aucun membre ne dépasse 3 week-ends prestés consécutifs sans repos adéquat.
-- [ ] Les compteurs de nuits sont respectés.
+- [ ] Les compteurs annuels d'heures de nuit et de nuits sont respectés.
 - [ ] Les dispenses de nuit sont respectées.
 - [ ] Les membres enceintes bénéficient du régime adapté.
 - [ ] Les pauses repas sont prévues ou correctement comptabilisées.
@@ -378,11 +417,14 @@ Avant de publier l’horaire, vérifier pour chaque membre :
 | Repos journalier          |                 11 h consécutives | Entre deux prestations                        |
 | Repos réduit exceptionnel |                               8 h | Seulement si exception valable                |
 | Jours consécutifs         |                     Max. 10 jours | Puis 2 jours de repos                         |
-| Week-ends libres          |   24/an ou 18/an si régime validé | Compteur annuel                               |
-| Week-ends consécutifs     |                   Après 3 prestés | 60 h de repos ininterrompu                    |
+| Série coupée par 1 repos  |                      Max. 9 jours | Reprise possible après 1 seul jour de repos   |
+| Week-ends travaillés      |    28/an ou 34/an si régime validé | Compteur annuel                               |
+| Week-ends consécutifs     |            Après 3 ou 4 si validé | 60 h de repos ininterrompu                    |
 | Nuit                      |                     22:00 - 06:00 | Compteur nuit                                 |
-| Nuits — régime général    |               55/an et 10/période | Sauf régime/décision particulière             |
-| Nuits — exception         | 12/période ou 60/an et 15/période | Selon service/régime applicable               |
+| Nuits — régime général    |                   400 h et 70/an | Sauf régime/décision particulière             |
+| Nuits — plafond autorisé  |                   480 h et 85/an | Selon accord/concertation ou nécessité        |
+| Nuits consécutives PJPol  |                        Max. 7 nuits | Puis 2 nuits libres consécutives              |
+| Nuits consécutives interne |                       Max. 3 nuits | Règle interne du simulateur                   |
 | Grossesse                 |          9 h/jour et 38 h/semaine | Pas de nuit jusqu’à 3 mois après accouchement |
 | Rappel                    |           Min. 3 h comptabilisées | Inclure déplacement A/R                       |
 | Rappelabilité             |                  Reprise max. 2 h | Délai fixé par l’autorité                     |
@@ -391,7 +433,8 @@ Avant de publier l’horaire, vérifier pour chaque membre :
 
 ## 21. Sources utiles
 
-- Arrêté royal du 30 mars 2001 portant la position juridique du personnel des services de police — PJPol : https://etaamb.openjustice.be/fr/arrete-royal-du-30-mars-2001_n2001000327.html
+- Arrêté royal du 30 mars 2001 portant la position juridique du personnel des services de police — PJPol consolidé : https://refli.be/fr/lex/2001000327
+- Arrêté royal du 30 mars 2001 portant la position juridique du personnel des services de police — version Moniteur belge : https://etaamb.openjustice.be/fr/arrete-royal-du-30-mars-2001_n2001000327.html
 - Arrêté royal du 9 juillet 2024 modifiant le PJPol concernant l’organisation du temps de travail : https://refli.be/fr/lex/2024006340
 - Arrêté royal du 24 octobre 2003 modifiant certaines règles relatives au temps de travail dans le PJPol : https://etaamb.openjustice.be/fr/arrete-royal-du-24-octobre-2003_n2003000605
 
@@ -403,15 +446,19 @@ Pour un service intervention, les erreurs les plus fréquentes sont généraleme
 
 - oublier le contrôle glissant des 7 jours ;
 - compter uniquement la semaine civile ;
-- dépasser les nuits par période ;
+- oublier les 2 jours de repos après 10 jours travaillés ;
+- accepter `10 jours prestés + 1 repos + reprise` alors que la coupure par un seul repos impose maximum 9 jours travaillés avant cette coupure ;
+- dépasser les plafonds annuels d'heures de nuit ou de nuits ;
 - sous-estimer l’impact des rappels ;
 - mal positionner les repos après les nuits ;
-- ne pas suivre les week-ends libres annuellement ;
+- ne pas suivre les week-ends travaillés annuellement ;
 - confondre une dérogation exceptionnelle avec une règle normale de planification.
 
 ---
 
 ## 23. Règles internes
+
+Dans le simulateur, ces règles internes doivent être affichées dans un groupe distinct des contrôles PJPol.
 
 - Les pauses "Matin" sont de 6h30 à 16h30 (10h de travail)
 - Les pauses "Après-midi" sont de 12h00 à 22h00 (10h de travail)
