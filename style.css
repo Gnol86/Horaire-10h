@@ -108,7 +108,7 @@ h2 {
   display: grid;
   grid-template-columns:
     minmax(190px, 1fr) minmax(120px, 0.55fr) minmax(150px, 0.7fr)
-    minmax(150px, 0.7fr) minmax(300px, 2fr) auto;
+    minmax(150px, 0.7fr) minmax(300px, 2fr);
   gap: 14px;
   align-items: end;
   padding: 16px;
@@ -158,6 +158,7 @@ input[aria-invalid="true"]:focus {
 }
 
 .toolbar-actions {
+  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;

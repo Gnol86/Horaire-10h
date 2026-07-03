@@ -6,6 +6,8 @@ const {
   SHIFT_DEFINITIONS,
   DEFAULT_SHIFT_DEFINITION_LIST,
   CUSTOM_VERSION_ID,
+  CUSTOM_VERSION_EXPORT_SCHEMA_VERSION,
+  CUSTOM_VERSION_EXPORT_TYPE,
   DEFAULT_VERSION_ID,
   BASE_VERSION_STORAGE_KEY,
   CUSTOM_VERSIONS_STORAGE_KEY,
@@ -13,6 +15,8 @@ const {
   createSimulation,
   createCustomScheduleSettings,
   createCustomVersion,
+  createCustomVersionExportJson,
+  createCustomVersionExportPayload,
   createScheduleSettingsForVersion,
   deleteCustomVersion,
   getCalendarWorkSegments,
@@ -24,6 +28,7 @@ const {
   loadCustomVersionLibrary,
   loadDisplaySettings,
   loadScheduleSettings,
+  importCustomVersionExport,
   normalizeDisplaySettings,
   renameCustomVersion,
   promoteCurrentCustomVersionLibrary,
@@ -765,6 +770,147 @@ test("plusieurs versions custom conservent leurs horaires et pauses separement",
   assert.equal(loaded.customVersions[0].shiftDefinitions.X.label, "Renfort");
   assert.equal(loaded.customVersions[1].name, "Equipe B");
   assert.equal(loaded.customVersions[1].shiftDefinitions.X, undefined);
+});
+
+test("une version custom active peut etre exportee en JSON sans date de depart", () => {
+  const shiftDefinitions = normalizeShiftDefinitions([
+    ...DEFAULT_SHIFT_DEFINITION_LIST,
+    {
+      code: "X",
+      label: "Renfort exporte",
+      color: "#4f46e5",
+      startTime: "09:00",
+      endTime: "17:00",
+      isOff: false,
+    },
+  ]);
+  const custom = createCustomVersion({
+    id: "custom-export-source",
+    name: "Equipe export",
+    scheduleSettings: {
+      ...createScheduleSettingsForVersion("v7", SHIFT_DEFINITIONS),
+      seriesCount: "9",
+      cycle: "M X R R R R R",
+      startDate: "2026-02-03",
+    },
+    shiftDefinitions,
+  });
+  const payload = createCustomVersionExportPayload(custom, "2026-07-04T08:00:00.000Z");
+  const json = createCustomVersionExportJson(custom, "2026-07-04T08:00:00.000Z");
+
+  assert.equal(payload.type, CUSTOM_VERSION_EXPORT_TYPE);
+  assert.equal(payload.schemaVersion, CUSTOM_VERSION_EXPORT_SCHEMA_VERSION);
+  assert.equal(payload.exportedAt, "2026-07-04T08:00:00.000Z");
+  assert.equal(payload.version.id, undefined);
+  assert.equal(payload.version.name, "Equipe export");
+  assert.equal(payload.version.baseVersionId, "v7");
+  assert.equal(payload.version.scheduleSettings.versionId, undefined);
+  assert.equal(payload.version.scheduleSettings.customName, undefined);
+  assert.equal(payload.version.scheduleSettings.startDate, undefined);
+  assert.equal(payload.version.scheduleSettings.seriesCount, "9");
+  assert.equal(payload.version.scheduleSettings.cycle, "M X R R R R R");
+  assert.equal(payload.version.shiftDefinitions.find((shift) => shift.code === "X").label, "Renfort exporte");
+  assert.deepEqual(JSON.parse(json), payload);
+});
+
+test("importer un JSON custom ajoute une nouvelle version sans ecraser l'existant", () => {
+  const existing = createCustomVersion({
+    id: "custom-existing",
+    name: "Version existante",
+    scheduleSettings: createScheduleSettingsForVersion("v7", SHIFT_DEFINITIONS),
+    shiftDefinitions: SHIFT_DEFINITIONS,
+  });
+  const importedShiftDefinitions = normalizeShiftDefinitions([
+    ...DEFAULT_SHIFT_DEFINITION_LIST,
+    {
+      code: "X",
+      label: "Renfort importe",
+      color: "#4f46e5",
+      startTime: "09:00",
+      endTime: "17:00",
+      isOff: false,
+    },
+  ]);
+  const importedSource = createCustomVersion({
+    id: "custom-file-id",
+    name: "Version importee",
+    scheduleSettings: {
+      ...createScheduleSettingsForVersion("v8", SHIFT_DEFINITIONS),
+      seriesCount: "10",
+      cycle: "M X R R R R R R",
+    },
+    shiftDefinitions: importedShiftDefinitions,
+  });
+  const imported = importCustomVersionExport(
+    { selectedVersionId: existing.id, customVersions: [existing] },
+    createCustomVersionExportPayload(importedSource, "2026-07-04T08:00:00.000Z"),
+  );
+
+  assert.equal(imported.library.customVersions.length, 2);
+  assert.equal(imported.library.customVersions[0].id, existing.id);
+  assert.equal(imported.library.customVersions[0].name, "Version existante");
+  assert.notEqual(imported.version.id, "custom-file-id");
+  assert.equal(imported.library.selectedVersionId, imported.version.id);
+  assert.equal(imported.version.name, "Version importee");
+  assert.equal(imported.version.baseVersionId, "v8");
+  assert.equal(imported.version.scheduleSettings.seriesCount, "10");
+  assert.equal(imported.version.scheduleSettings.cycle, "M X R R R R R R");
+  assert.equal(imported.version.shiftDefinitions.X.label, "Renfort importe");
+});
+
+test("importer un nom deja present ajoute le suffixe import", () => {
+  const existing = createCustomVersion({
+    id: "custom-existing",
+    name: "Equipe A",
+    scheduleSettings: createScheduleSettingsForVersion("v7", SHIFT_DEFINITIONS),
+    shiftDefinitions: SHIFT_DEFINITIONS,
+  });
+  const source = createCustomVersion({
+    id: "custom-source",
+    name: "Equipe A",
+    scheduleSettings: createScheduleSettingsForVersion("v8", SHIFT_DEFINITIONS),
+    shiftDefinitions: SHIFT_DEFINITIONS,
+  });
+  const imported = importCustomVersionExport(
+    { selectedVersionId: existing.id, customVersions: [existing] },
+    createCustomVersionExportPayload(source, "2026-07-04T08:00:00.000Z"),
+  );
+
+  assert.equal(imported.version.name, "Equipe A (import)");
+  assert.equal(imported.library.customVersions.map((version) => version.name).join(" | "), "Equipe A | Equipe A (import)");
+});
+
+test("un import JSON invalide ou de mauvais format est rejete sans changement", () => {
+  const existing = createCustomVersion({
+    id: "custom-existing",
+    name: "Version existante",
+    scheduleSettings: createScheduleSettingsForVersion("v7", SHIFT_DEFINITIONS),
+    shiftDefinitions: SHIFT_DEFINITIONS,
+  });
+  const library = { selectedVersionId: existing.id, customVersions: [existing] };
+
+  assert.throws(() => importCustomVersionExport(library, "{invalid"), /JSON invalide/);
+  assert.throws(
+    () =>
+      importCustomVersionExport(library, {
+        type: "horaire10h.other",
+        schemaVersion: CUSTOM_VERSION_EXPORT_SCHEMA_VERSION,
+        version: {},
+      }),
+    /format non reconnu/i,
+  );
+  assert.throws(
+    () =>
+      importCustomVersionExport(library, {
+        type: CUSTOM_VERSION_EXPORT_TYPE,
+        schemaVersion: 99,
+        version: {},
+      }),
+    /format non reconnu/i,
+  );
+
+  assert.equal(library.customVersions.length, 1);
+  assert.equal(library.selectedVersionId, existing.id);
 });
 
 test("renommer et supprimer une version custom garde les versions officielles intactes", () => {

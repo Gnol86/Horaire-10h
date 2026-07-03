@@ -137,6 +137,8 @@
   const SHIFT_SETTINGS_STORAGE_KEY = "horaire10h.shiftDefinitions.v1";
   const CUSTOM_VERSIONS_STORAGE_KEY = "horaire10h.customVersions.v1";
   const DISPLAY_SETTINGS_STORAGE_KEY = "horaire10h.displaySettings.v1";
+  const CUSTOM_VERSION_EXPORT_TYPE = "horaire10h.customVersion";
+  const CUSTOM_VERSION_EXPORT_SCHEMA_VERSION = 1;
   const SHIFT_CODE_PATTERN = /^[A-Z0-9]{1,4}$/;
   const START_DATE_STEP_BASE = "1970-01-05";
   const DEFAULT_SHIFT_DEFINITION_LIST = [
@@ -922,6 +924,116 @@
       baseVersionId: version.baseVersionId,
       scheduleSettings: version.scheduleSettings,
       shiftDefinitions: shiftDefinitionsToList(version.shiftDefinitions),
+    };
+  }
+
+  function getExportableScheduleSettings(settings = {}) {
+    return {
+      baseVersionId: settings.baseVersionId,
+      weekendDispoLimit: settings.weekendDispoLimit,
+      seriesCount: settings.seriesCount,
+      seriesOffset: settings.seriesOffset,
+      cycle: settings.cycle,
+    };
+  }
+
+  function createCustomVersionExportPayload(version, exportedAt = new Date().toISOString()) {
+    const normalized = createCustomVersion(version);
+    return {
+      type: CUSTOM_VERSION_EXPORT_TYPE,
+      schemaVersion: CUSTOM_VERSION_EXPORT_SCHEMA_VERSION,
+      exportedAt: String(exportedAt),
+      version: {
+        name: normalized.name,
+        baseVersionId: normalized.baseVersionId,
+        scheduleSettings: getExportableScheduleSettings(normalized.scheduleSettings),
+        shiftDefinitions: shiftDefinitionsToList(normalized.shiftDefinitions),
+      },
+    };
+  }
+
+  function createCustomVersionExportJson(version, exportedAt) {
+    return JSON.stringify(createCustomVersionExportPayload(version, exportedAt), null, 2);
+  }
+
+  function parseCustomVersionExportPayload(input) {
+    let payload = input;
+    if (typeof input === "string") {
+      try {
+        payload = JSON.parse(input);
+      } catch {
+        throw new Error("JSON invalide.");
+      }
+    }
+
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new Error("Format non reconnu.");
+    }
+    if (
+      payload.type !== CUSTOM_VERSION_EXPORT_TYPE ||
+      payload.schemaVersion !== CUSTOM_VERSION_EXPORT_SCHEMA_VERSION
+    ) {
+      throw new Error("Format non reconnu.");
+    }
+
+    const version = payload.version;
+    if (!version || typeof version !== "object" || Array.isArray(version)) {
+      throw new Error("Version custom absente ou invalide.");
+    }
+    if (!version.scheduleSettings || typeof version.scheduleSettings !== "object") {
+      throw new Error("Version custom absente ou invalide.");
+    }
+    if (!Array.isArray(version.shiftDefinitions) || version.shiftDefinitions.length === 0) {
+      throw new Error("Version custom absente ou invalide.");
+    }
+
+    return {
+      name: normalizeCustomVersionName(version.name, CUSTOM_VERSION_LABEL),
+      baseVersionId: normalizeOfficialVersionId(version.baseVersionId),
+      scheduleSettings: {
+        ...version.scheduleSettings,
+        startDate: undefined,
+      },
+      shiftDefinitions: normalizeShiftDefinitions(version.shiftDefinitions),
+    };
+  }
+
+  function getUniqueImportedCustomVersionName(name, customVersions = []) {
+    const baseName = normalizeCustomVersionName(name, CUSTOM_VERSION_LABEL);
+    const existingNames = new Set(customVersions.map((version) => version.name));
+    if (!existingNames.has(baseName)) {
+      return baseName;
+    }
+
+    for (let index = 1; index < 100; index += 1) {
+      const suffix = index === 1 ? " (import)" : ` (import ${index})`;
+      const trimmedBaseName = baseName.slice(0, Math.max(1, 40 - suffix.length)).trimEnd();
+      const candidate = normalizeCustomVersionName(`${trimmedBaseName}${suffix}`, CUSTOM_VERSION_LABEL);
+      if (!existingNames.has(candidate)) {
+        return candidate;
+      }
+    }
+
+    return normalizeCustomVersionName(`${CUSTOM_VERSION_LABEL} ${customVersions.length + 1}`);
+  }
+
+  function importCustomVersionExport(library, input) {
+    const normalizedLibrary = normalizeCustomVersionLibrary(library);
+    const parsed = parseCustomVersionExportPayload(input);
+    const importedVersion = createCustomVersion({
+      name: getUniqueImportedCustomVersionName(parsed.name, normalizedLibrary.customVersions),
+      baseVersionId: parsed.baseVersionId,
+      scheduleSettings: parsed.scheduleSettings,
+      shiftDefinitions: parsed.shiftDefinitions,
+    });
+    const nextLibrary = normalizeCustomVersionLibrary({
+      selectedVersionId: importedVersion.id,
+      customVersions: [...normalizedLibrary.customVersions, importedVersion],
+    });
+
+    return {
+      library: nextLibrary,
+      version: nextLibrary.customVersions.find((version) => version.id === importedVersion.id) || importedVersion,
     };
   }
 
@@ -2747,6 +2859,9 @@
     const weekendDispoSelect = document.getElementById("weekendDispoSelect");
     const seriesOffsetSelect = document.getElementById("seriesOffsetSelect");
     const cycleInput = document.getElementById("cycleInput");
+    const exportVersion = document.getElementById("exportVersion");
+    const importVersion = document.getElementById("importVersion");
+    const importVersionFile = document.getElementById("importVersionFile");
     const duplicateVersion = document.getElementById("duplicateVersion");
     const renameVersion = document.getElementById("renameVersion");
     const deleteVersion = document.getElementById("deleteVersion");
@@ -2831,6 +2946,7 @@
         Boolean(getCustomVersionById(versionSelect.value)),
         !versionNameEditor.hidden,
       );
+      exportVersion.disabled = !actionState.canRename;
       renameVersion.disabled = !actionState.canRename;
       deleteVersion.disabled = !actionState.canDelete;
       versionNameEditor.hidden = !actionState.renameEditorOpen;
@@ -3011,6 +3127,65 @@
 
     function markScheduleCustom() {
       saveActiveCustomVersion();
+    }
+
+    function getExportFileName(version) {
+      const slug = normalizeCustomVersionName(version.name, CUSTOM_VERSION_LABEL)
+        .toLocaleLowerCase("fr-BE")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 48);
+      return `horaire-10h-${slug || "custom"}.json`;
+    }
+
+    function downloadJsonFile(fileName, text) {
+      const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    }
+
+    function exportActiveCustomVersion() {
+      const customVersion = getActiveCustomVersion();
+      if (!customVersion) {
+        setShiftStatus("Sélectionne une version personnalisée à exporter.", true);
+        return;
+      }
+      downloadJsonFile(getExportFileName(customVersion), createCustomVersionExportJson(customVersion));
+      setShiftStatus(`${customVersion.name} exportée.`);
+    }
+
+    function readJsonImportFile(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.addEventListener("load", () => resolve(String(reader.result || "")));
+        reader.addEventListener("error", () => reject(new Error("Lecture du fichier impossible.")));
+        reader.readAsText(file);
+      });
+    }
+
+    async function importCustomVersionFile(file) {
+      if (!file) {
+        return;
+      }
+      try {
+        const text = await readJsonImportFile(file);
+        const imported = importCustomVersionExport(customVersionLibrary, text);
+        customVersionLibrary = imported.library;
+        setVersionNameEditorOpen(false);
+        loadVersionState(imported.version.id);
+        setShiftStatus(`${imported.version.name} importée.`);
+        refresh();
+      } catch (error) {
+        setShiftStatus(error?.message || "Import impossible.", true);
+      }
     }
 
     function setCycleValidity(parsedCycle) {
@@ -3238,6 +3413,15 @@
       setCycleFromVersion();
       refresh();
     });
+    exportVersion.addEventListener("click", exportActiveCustomVersion);
+    importVersion.addEventListener("click", () => {
+      importVersionFile.click();
+    });
+    importVersionFile.addEventListener("change", async () => {
+      const file = importVersionFile.files?.[0];
+      importVersionFile.value = "";
+      await importCustomVersionFile(file);
+    });
     duplicateVersion.addEventListener("click", () => {
       setVersionNameEditorOpen(false);
       const sourceVersion = getActiveCustomVersion();
@@ -3313,6 +3497,8 @@
     SHIFT_DEFINITIONS,
     BASE_VERSION_STORAGE_KEY,
     CUSTOM_VERSION_ID,
+    CUSTOM_VERSION_EXPORT_SCHEMA_VERSION,
+    CUSTOM_VERSION_EXPORT_TYPE,
     CUSTOM_VERSIONS_STORAGE_KEY,
     DEFAULT_VERSION_ID,
     DISPLAY_SETTINGS_STORAGE_KEY,
@@ -3322,6 +3508,8 @@
     createSimulation,
     createCustomScheduleSettings,
     createCustomVersion,
+    createCustomVersionExportJson,
+    createCustomVersionExportPayload,
     createScheduleSettingsForVersion,
     deleteCustomVersion,
     getAnnualCounterBalance,
@@ -3333,6 +3521,7 @@
     getShiftSettingsViewModel,
     getWeekendHoursForShift,
     getVersionActionsViewModel,
+    importCustomVersionExport,
     loadDisplaySettings,
     loadScheduleSettings,
     loadActiveShiftDefinitionsForSchedule,
@@ -3350,6 +3539,7 @@
     loadBaseVersionDefinitions,
     normalizeCycle,
     parseCycleInput,
+    parseCustomVersionExportPayload,
     parseSeriesOffset,
     parseSeriesCount,
     parseWeekendDispoLimit,
