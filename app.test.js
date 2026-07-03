@@ -14,6 +14,7 @@ const {
   createCustomVersion,
   createScheduleSettingsForVersion,
   deleteCustomVersion,
+  getCalendarWorkSegments,
   getRuleStatusText,
   getVersionActionsViewModel,
   loadBaseVersionDefinitions,
@@ -910,4 +911,154 @@ test("les compteurs annuels de la version equilibree restent proches entre serie
   assert.equal(spread(simulation.stats.map((row) => row.totalHours)), 32);
   assert.equal(Math.max(...simulation.stats.map((row) => row.averageWeeklyHours)) < 38, true);
   assert.equal(Math.max(...simulation.stats.map((row) => row.weekendWorkedYear)) <= 28, true);
+});
+
+function analyzeCycleSequence(cycleInput) {
+  const cycle = cycleInput.split(" ").filter(Boolean);
+  const manStarts = [];
+  const nightPairs = [];
+  const alternatingNightRestStarts = [];
+  for (let index = 0; index < cycle.length; index += 1) {
+    const current = cycle[index];
+    const next = cycle[(index + 1) % cycle.length];
+    const afterNext = cycle[(index + 2) % cycle.length];
+    const afterAfterNext = cycle[(index + 3) % cycle.length];
+    if (current === "M" && next === "A" && afterNext === "N") {
+      manStarts.push(index);
+    }
+    if (current === "N" && next === "N") {
+      nightPairs.push({
+        startIndex: index,
+        startWeekday: index % 7,
+        nextWeekday: (index + 1) % 7,
+      });
+    }
+    if (current === "N" && next === "DN" && afterNext === "N" && afterAfterNext === "DN") {
+      alternatingNightRestStarts.push(index);
+    }
+  }
+  return { alternatingNightRestStarts, manStarts, nightPairs };
+}
+
+function getDisplayWorkedWeekends(simulation) {
+  const workedWeekends = [];
+  simulation.series.forEach((serie) => {
+    for (let saturdayIndex = 5; saturdayIndex < simulation.displayAssignments.days.length; saturdayIndex += 7) {
+      const weekendHours = [saturdayIndex, saturdayIndex + 1]
+        .flatMap((dayIndex) =>
+          getCalendarWorkSegments(simulation.displayAssignments, serie.index, dayIndex),
+        )
+        .reduce((sum, segment) => sum + segment.hours, 0);
+      const codes = [saturdayIndex, saturdayIndex + 1].map(
+        (dayIndex) => simulation.displayAssignments.days[dayIndex].assignments[serie.index].code,
+      );
+      if (weekendHours > 0) {
+        workedWeekends.push({
+          seriesId: serie.id,
+          week: (saturdayIndex - 5) / 7 + 1,
+          hours: Math.round(weekendHours * 10) / 10,
+          codes: codes.join("/"),
+        });
+      }
+    }
+  });
+  return workedWeekends;
+}
+
+test("la version 7 series equilibree V2 enchaine les matins apres-midis nuits sans nuits lourdes", () => {
+  const settings = createScheduleSettingsForVersion("v7-balanced-v2", SHIFT_DEFINITIONS);
+  const simulation = createSimulation("v7-balanced-v2", {
+    startDate: "2026-01-05",
+  });
+  const failures = simulation.rules.filter((rule) => rule.status === "fail");
+  const warningIds = simulation.rules.filter((rule) => rule.status === "warn").map((rule) => rule.id);
+  const sequence = analyzeCycleSequence(settings.cycle);
+
+  assert.equal(simulation.version.label, "10h - 7 Séries Équilibré V2");
+  assert.equal(settings.cycle.split(" ").length, 49);
+  assert.equal(settings.seriesOffset, "7");
+  assert.deepEqual(failures, []);
+  assert.deepEqual(warningIds, ["weekend-free", "night-hours-cap"]);
+  assert.equal(sequence.manStarts.length >= 4, true);
+  assert.deepEqual(sequence.nightPairs, [
+    {
+      startIndex: 18,
+      startWeekday: 4,
+      nextWeekday: 5,
+    },
+  ]);
+  assert.equal(Math.max(...simulation.stats.map((row) => row.maxConsecutiveNights)), 2);
+});
+
+test("la version 7 series equilibree V2 reste dans les plafonds derogatoires", () => {
+  const simulation = createSimulation("v7-balanced-v2", {
+    startDate: "2026-01-05",
+  });
+  const shifts = loadActiveShiftDefinitionsForSchedule(
+    createScheduleSettingsForVersion("v7-balanced-v2", SHIFT_DEFINITIONS),
+  );
+  const spread = (values) => Math.max(...values) - Math.min(...values);
+
+  assert.equal(shifts.D, undefined);
+  assert.equal(shifts.D1.role, "D");
+  assert.equal(shifts.D2.role, "D");
+  assert.equal(Math.max(...simulation.stats.map((row) => row.averageWeeklyHours)) < 38, true);
+  assert.equal(Math.max(...simulation.stats.map((row) => row.max168Hours)), 50);
+  assert.equal(Math.max(...simulation.stats.map((row) => row.weekendWorkedYear)) <= 34, true);
+  assert.equal(Math.max(...simulation.stats.map((row) => row.nightHoursYear)) <= 480, true);
+  assert.equal(spread(simulation.stats.map((row) => row.weekendWorkedYear)), 2);
+  assert.equal(spread(simulation.stats.map((row) => row.nightCount)), 2);
+});
+
+test("la version 7 series equilibree V3 supprime les nuits alternees fatigantes", () => {
+  const settings = createScheduleSettingsForVersion("v7-balanced-v3", SHIFT_DEFINITIONS);
+  const simulation = createSimulation("v7-balanced-v3", {
+    startDate: "2026-01-05",
+  });
+  const failures = simulation.rules.filter((rule) => rule.status === "fail");
+  const warningIds = simulation.rules.filter((rule) => rule.status === "warn").map((rule) => rule.id);
+  const weekdayDispoRule = simulation.rules.find((rule) => rule.id === "weekday-dispo");
+  const morningCoverageRule = simulation.rules.find((rule) => rule.id === "daily-morning-coverage");
+  const sequence = analyzeCycleSequence(settings.cycle);
+
+  assert.equal(simulation.version.label, "10h - 7 Séries Équilibré V3");
+  assert.equal(settings.cycle.split(" ").length, 49);
+  assert.equal(settings.seriesOffset, "7");
+  assert.deepEqual(failures, []);
+  assert.deepEqual(warningIds, ["weekend-free", "night-hours-cap"]);
+  assert.equal(weekdayDispoRule?.title, "Au moins 1 Dispo par jour ouvrable");
+  assert.equal(morningCoverageRule?.title, "Un Matin par jour, week-end doublable");
+  assert.deepEqual(sequence.alternatingNightRestStarts, []);
+  assert.deepEqual(sequence.nightPairs, [
+    {
+      startIndex: 11,
+      startWeekday: 4,
+      nextWeekday: 5,
+    },
+  ]);
+  assert.equal(Math.max(...simulation.stats.map((row) => row.maxConsecutiveNights)) <= 2, true);
+});
+
+test("la version 7 series equilibree V3 concentre les week-ends travailles", () => {
+  const simulation = createSimulation("v7-balanced-v3", {
+    startDate: "2026-01-05",
+  });
+  const workedWeekends = getDisplayWorkedWeekends(simulation);
+  const weakWeekends = workedWeekends.filter((weekend) => weekend.hours < 16);
+  const weakCodes = [...new Set(weakWeekends.map((weekend) => weekend.codes))];
+  const spread = (values) => Math.max(...values) - Math.min(...values);
+
+  assert.equal(weakWeekends.length, 7);
+  assert.deepEqual(weakCodes, ["M/N"]);
+  assert.equal(workedWeekends.filter((weekend) => weekend.codes === "R/M").length, 0);
+  assert.equal(workedWeekends.filter((weekend) => weekend.codes === "A/N").length, 0);
+  assert.equal(workedWeekends.filter((weekend) => weekend.codes === "N/DN").length, 7);
+  assert.equal(workedWeekends.filter((weekend) => weekend.codes === "M/M").length, 7);
+  assert.equal(workedWeekends.filter((weekend) => weekend.codes === "A/A").length, 7);
+  assert.equal(Math.max(...simulation.stats.map((row) => row.averageWeeklyHours)) < 38, true);
+  assert.equal(Math.max(...simulation.stats.map((row) => row.max168Hours)) <= 50, true);
+  assert.equal(Math.max(...simulation.stats.map((row) => row.weekendWorkedYear)) <= 34, true);
+  assert.equal(Math.max(...simulation.stats.map((row) => row.nightHoursYear)) <= 480, true);
+  assert.equal(spread(simulation.stats.map((row) => row.weekendWorkedYear)) <= 1, true);
+  assert.equal(spread(simulation.stats.map((row) => row.nightCount)) <= 3, true);
 });

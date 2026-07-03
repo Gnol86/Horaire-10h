@@ -18,6 +18,8 @@
   const CURRENT_VERSION_LABEL = "Horaire actuel";
   const DEFAULT_WEEKDAY_DISPO_TARGET = 2;
   const BALANCED_7_VERSION_ID = "v7-balanced";
+  const BALANCED_7_V2_VERSION_ID = "v7-balanced-v2";
+  const BALANCED_7_V3_VERSION_ID = "v7-balanced-v3";
   const BALANCED_7_CYCLE = [
     "M",
     "D2",
@@ -69,6 +71,108 @@
     "R",
     "R",
   ];
+  const BALANCED_7_V2_CYCLE = [
+    "A",
+    "N",
+    "DN",
+    "N",
+    "DN",
+    "R",
+    "R",
+    "D2",
+    "M",
+    "D2",
+    "M",
+    "A",
+    "R",
+    "R",
+    "D1",
+    "D1",
+    "D1",
+    "A",
+    "N",
+    "N",
+    "DN",
+    "R",
+    "D2",
+    "M",
+    "D2",
+    "D2",
+    "R",
+    "R",
+    "M",
+    "A",
+    "N",
+    "DN",
+    "R",
+    "M",
+    "A",
+    "N",
+    "DN",
+    "A",
+    "R",
+    "M",
+    "A",
+    "N",
+    "DN",
+    "R",
+    "R",
+    "D1",
+    "D1",
+    "R",
+    "M",
+  ];
+  const BALANCED_7_V3_CYCLE = [
+    "N",
+    "DN",
+    "R",
+    "M",
+    "M",
+    "D1",
+    "D2",
+    "M",
+    "A",
+    "D2",
+    "R",
+    "N",
+    "N",
+    "DN",
+    "R",
+    "N",
+    "DN",
+    "R",
+    "D1",
+    "M",
+    "M",
+    "R",
+    "R",
+    "M",
+    "D2",
+    "A",
+    "R",
+    "R",
+    "A",
+    "D2",
+    "N",
+    "DN",
+    "R",
+    "R",
+    "R",
+    "D2",
+    "M",
+    "R",
+    "A",
+    "R",
+    "M",
+    "N",
+    "DN",
+    "R",
+    "A",
+    "N",
+    "DN",
+    "A",
+    "A",
+  ];
   const RULE_CATEGORIES = {
     pjpol: {
       id: "pjpol",
@@ -112,6 +216,25 @@
       seriesOffset: "7",
       cycle: BALANCED_7_CYCLE,
       weekdayDispoTarget: 2,
+    },
+    [BALANCED_7_V2_VERSION_ID]: {
+      id: BALANCED_7_V2_VERSION_ID,
+      label: "10h - 7 Séries Équilibré V2",
+      weeks: 7,
+      seriesCount: 7,
+      seriesOffset: "7",
+      cycle: BALANCED_7_V2_CYCLE,
+      weekdayDispoTarget: 2,
+    },
+    [BALANCED_7_V3_VERSION_ID]: {
+      id: BALANCED_7_V3_VERSION_ID,
+      label: "10h - 7 Séries Équilibré V3",
+      weeks: 7,
+      seriesCount: 7,
+      seriesOffset: "7",
+      cycle: BALANCED_7_V3_CYCLE,
+      weekdayDispoTarget: 1,
+      allowWeekendDoubleCoverage: true,
     },
   };
 
@@ -578,9 +701,17 @@
     return normalizeCurrentVersionName(name) === normalizeCurrentVersionName(CURRENT_VERSION_LABEL);
   }
 
+  function usesBalanced7ShiftDefinitions(versionId) {
+    return (
+      versionId === BALANCED_7_VERSION_ID ||
+      versionId === BALANCED_7_V2_VERSION_ID ||
+      versionId === BALANCED_7_V3_VERSION_ID
+    );
+  }
+
   function getOfficialShiftDefinitions(versionId) {
     const definition = VERSION_DEFINITIONS[versionId] || VERSION_DEFINITIONS[getDefaultVersionId()];
-    if (definition.id === BALANCED_7_VERSION_ID) {
+    if (usesBalanced7ShiftDefinitions(definition.id)) {
       return normalizeShiftDefinitions(BALANCED_7_SHIFT_DEFINITION_LIST);
     }
     return normalizeShiftDefinitions(definition.shiftDefinitions || DEFAULT_SHIFT_DEFINITION_LIST);
@@ -1754,17 +1885,34 @@
     });
   }
 
-  function countDailyCoverageIssues(assignments, role, shiftDefinitions = assignments.shiftDefinitions || SHIFT_DEFINITIONS) {
+  function countDailyCoverageIssues(
+    assignments,
+    role,
+    shiftDefinitions = assignments.shiftDefinitions || SHIFT_DEFINITIONS,
+    options = {},
+  ) {
+    const allowWeekendDoubleCoverage = Boolean(options.allowWeekendDoubleCoverage);
     return assignments.days
-      .map((day) => ({
-        date: day.date,
-        count: day.assignments.filter((assignment) => hasShiftRole(shiftDefinitions, assignment.code, role)).length,
-      }))
-      .filter((day) => day.count !== 1);
+      .map((day) => {
+        const count = day.assignments.filter((assignment) =>
+          hasShiftRole(shiftDefinitions, assignment.code, role),
+        ).length;
+        const weekendDoubleAllowed =
+          allowWeekendDoubleCoverage && isWeekend(day.date) && (role === "M" || role === "A");
+        return {
+          date: day.date,
+          count,
+          covered: count === 1 || (weekendDoubleAllowed && count === 2),
+        };
+      })
+      .filter((day) => !day.covered);
   }
 
-  function formatDailyCoverageDetail(issues, label) {
+  function formatDailyCoverageDetail(issues, label, options = {}) {
     if (issues.length === 0) {
+      if (options.allowWeekendDoubleCoverage) {
+        return `Chaque jour a au moins une série en ${label}, avec doublage possible le week-end.`;
+      }
       return `Chaque jour a exactement une série en ${label}.`;
     }
     const firstIssue = issues[0];
@@ -1819,9 +1967,12 @@
     weekendDispoLimit,
     shiftDefinitions = assignments.shiftDefinitions || SHIFT_DEFINITIONS,
     weekdayDispoTarget = DEFAULT_WEEKDAY_DISPO_TARGET,
+    options = {},
   ) {
     const rules = [];
     const requiredWeekdayDispos = parseWeekdayDispoTarget(weekdayDispoTarget);
+    const allowWeekendDoubleCoverage = Boolean(options.allowWeekendDoubleCoverage);
+    const weekendDoubleCoverageOptions = { allowWeekendDoubleCoverage };
     const maxAverage = getWorst(stats, "averageWeeklyHours");
     const max24 = getWorst(stats, "max24Hours");
     const max168 = getWorst(stats, "max168Hours");
@@ -1850,8 +2001,18 @@
       requiredWeekdayDispos,
       shiftDefinitions,
     );
-    const morningCoverageIssues = countDailyCoverageIssues(assignments, "M", shiftDefinitions);
-    const afternoonCoverageIssues = countDailyCoverageIssues(assignments, "A", shiftDefinitions);
+    const morningCoverageIssues = countDailyCoverageIssues(
+      assignments,
+      "M",
+      shiftDefinitions,
+      weekendDoubleCoverageOptions,
+    );
+    const afternoonCoverageIssues = countDailyCoverageIssues(
+      assignments,
+      "A",
+      shiftDefinitions,
+      weekendDoubleCoverageOptions,
+    );
     const nightCoverageIssues = countDailyCoverageIssues(assignments, "N", shiftDefinitions);
     const nonWorkingDispoSummary = getNonWorkingDispoSummary(assignments, weekendDispoLimit, shiftDefinitions);
 
@@ -1949,17 +2110,19 @@
       rules,
       "internal",
       "daily-morning-coverage",
-      "Un Matin par jour",
+      allowWeekendDoubleCoverage ? "Un Matin par jour, week-end doublable" : "Un Matin par jour",
       morningCoverageIssues.length === 0,
-      formatDailyCoverageDetail(morningCoverageIssues, "Matin"),
+      formatDailyCoverageDetail(morningCoverageIssues, "Matin", weekendDoubleCoverageOptions),
     );
     addRule(
       rules,
       "internal",
       "daily-afternoon-coverage",
-      "Un Après-midi par jour",
+      allowWeekendDoubleCoverage
+        ? "Un Après-midi par jour, week-end doublable"
+        : "Un Après-midi par jour",
       afternoonCoverageIssues.length === 0,
-      formatDailyCoverageDetail(afternoonCoverageIssues, "Après-midi"),
+      formatDailyCoverageDetail(afternoonCoverageIssues, "Après-midi", weekendDoubleCoverageOptions),
     );
     addRule(
       rules,
@@ -2042,7 +2205,7 @@
     const definition = getVersionDefinition(versionId, options.scheduleSettings);
     const shiftDefinitions = options.shiftDefinitions
       ? normalizeShiftDefinitions(options.shiftDefinitions)
-      : definition.id === BALANCED_7_VERSION_ID || definition.shiftDefinitions
+      : usesBalanced7ShiftDefinitions(definition.id) || definition.shiftDefinitions
         ? getOfficialShiftDefinitions(definition.id)
         : SHIFT_DEFINITIONS;
     const weekdayDispoTarget = parseWeekdayDispoTarget(definition.weekdayDispoTarget);
@@ -2082,6 +2245,9 @@
       weekendDispoLimit,
       shiftDefinitions,
       weekdayDispoTarget,
+      {
+        allowWeekendDoubleCoverage: definition.allowWeekendDoubleCoverage,
+      },
     );
     const periodEnd = addDays(startDate, yearDays - 1);
     const completeDisplayCycles = Math.floor(yearDays / displayDays);
