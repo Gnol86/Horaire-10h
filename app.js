@@ -31,8 +31,122 @@
     weekendHoursMonth: "Heures WE / mois",
   };
   const BALANCED_7_VERSION_ID = "v7-balanced";
-  const DEFAULT_SELECTED_VERSION_ID = BALANCED_7_VERSION_ID;
+  const DEFAULT_SELECTED_VERSION_ID = DEFAULT_VERSION_ID;
   const LEGACY_BALANCED_7_VERSION_IDS = new Set(["v7-balanced-v2", "v7-balanced-v3"]);
+  const CURRENT_VERSION_CYCLE = [
+    "D",
+    "D",
+    "D",
+    "D",
+    "D",
+    "R",
+    "R",
+    "D",
+    "D",
+    "M",
+    "A",
+    "A",
+    "R",
+    "R",
+    "N",
+    "N",
+    "DN",
+    "D",
+    "R",
+    "M",
+    "M",
+    "A",
+    "A",
+    "A",
+    "R",
+    "N",
+    "N",
+    "N",
+    "DN",
+    "R",
+    "D",
+    "D",
+    "D",
+    "R",
+    "R",
+    "M",
+    "M",
+    "R",
+    "M",
+    "M",
+    "A",
+    "A",
+    "R",
+    "D",
+    "N",
+    "N",
+    "DN",
+    "R",
+    "R",
+  ];
+  const CURRENT_SHIFT_DEFINITION_LIST = [
+    {
+      code: "M",
+      role: "M",
+      label: "Matin",
+      color: "#2f6fba",
+      startTime: "06:00",
+      endTime: "14:00",
+      unpaidBreakMinutes: 0,
+      isOff: false,
+      className: "tag-m",
+    },
+    {
+      code: "A",
+      role: "A",
+      label: "Après-midi",
+      color: "#c35a10",
+      startTime: "14:00",
+      endTime: "22:00",
+      unpaidBreakMinutes: 0,
+      isOff: false,
+      className: "tag-a",
+    },
+    {
+      code: "N",
+      role: "N",
+      label: "Nuit",
+      color: "#343a66",
+      startTime: "22:00",
+      endTime: "06:00",
+      unpaidBreakMinutes: 0,
+      isOff: false,
+      className: "tag-n",
+    },
+    {
+      code: "DN",
+      role: "DN",
+      label: "Descente de nuit",
+      color: "#6f6b77",
+      isOff: true,
+      className: "tag-dn",
+    },
+    {
+      code: "R",
+      role: "R",
+      label: "Repos",
+      color: "#d8d5cc",
+      isOff: true,
+      className: "tag-r",
+    },
+    {
+      code: "D",
+      role: "D",
+      label: "Dispo",
+      color: "#2e7d54",
+      startTime: "08:00",
+      endTime: "16:06",
+      breakStartTime: "12:00",
+      breakEndTime: "12:30",
+      isOff: false,
+      className: "tag-d",
+    },
+  ];
   const BALANCED_7_CYCLE = [
     "N",
     "DN",
@@ -127,7 +241,10 @@
       label: CURRENT_VERSION_LABEL,
       weeks: 7,
       seriesCount: 7,
-      cycle: ["M", "A", "N", "DN", "R", "R", "D"],
+      seriesOffset: "7",
+      weekendDispoLimit: "0",
+      cycle: CURRENT_VERSION_CYCLE,
+      shiftDefinitions: CURRENT_SHIFT_DEFINITION_LIST,
     },
   };
 
@@ -138,6 +255,7 @@
   const SHIFT_SETTINGS_STORAGE_KEY = "horaire10h.shiftDefinitions.v1";
   const CUSTOM_VERSIONS_STORAGE_KEY = "horaire10h.customVersions.v1";
   const DISPLAY_SETTINGS_STORAGE_KEY = "horaire10h.displaySettings.v1";
+  const SCHEDULE_STATE_REVISION = 2;
   const CUSTOM_VERSION_EXPORT_TYPE = "horaire10h.customVersion";
   const CUSTOM_VERSION_EXPORT_SCHEMA_VERSION = 1;
   const SHIFT_CODE_PATTERN = /^[A-Z0-9]{1,4}$/;
@@ -673,7 +791,12 @@
         return {};
       }
       const parsed = JSON.parse(rawValue);
-      if (!parsed || typeof parsed !== "object" || !parsed[DEFAULT_VERSION_ID]) {
+      if (
+        !parsed ||
+        typeof parsed !== "object" ||
+        parsed.stateRevision !== SCHEDULE_STATE_REVISION ||
+        !parsed[DEFAULT_VERSION_ID]
+      ) {
         return {};
       }
       return {
@@ -698,6 +821,7 @@
     storage.setItem(
       BASE_VERSION_STORAGE_KEY,
       JSON.stringify({
+        stateRevision: SCHEDULE_STATE_REVISION,
         [DEFAULT_VERSION_ID]: normalizeBaseVersionDefinition(
           { ...currentDefinition, id: DEFAULT_VERSION_ID, label: CURRENT_VERSION_LABEL },
           VERSION_DEFINITIONS[DEFAULT_VERSION_ID],
@@ -1048,16 +1172,18 @@
     const customVersions = Array.isArray(input.customVersions)
       ? input.customVersions.map((version) => createCustomVersion(version))
       : [];
+    const hasCurrentStateRevision = input.stateRevision === SCHEDULE_STATE_REVISION;
     const selectedVersionId = String(input.selectedVersionId || "");
     const selectedOfficialVersionId = normalizeOfficialVersionId(selectedVersionId);
     const hasSelectedCustom = customVersions.some((version) => version.id === selectedVersionId);
-    const normalizedSelectedVersionId = hasSelectedCustom || isOfficialVersionId(selectedVersionId)
-      ? hasSelectedCustom
-        ? selectedVersionId
-        : selectedOfficialVersionId
-      : customVersions[0]?.id || getDefaultVersionId();
+    const normalizedSelectedVersionId = hasSelectedCustom
+      ? selectedVersionId
+      : hasCurrentStateRevision && isOfficialVersionId(selectedVersionId)
+        ? selectedOfficialVersionId
+        : getDefaultVersionId();
 
     return {
+      stateRevision: SCHEDULE_STATE_REVISION,
       selectedVersionId: normalizedSelectedVersionId,
       customVersions,
     };
@@ -1074,15 +1200,15 @@
         shiftDefinitions: storedShiftDefinitions,
       });
       return {
+        stateRevision: SCHEDULE_STATE_REVISION,
         selectedVersionId: customVersion.id,
         customVersions: [customVersion],
       };
     }
 
     return {
-      selectedVersionId: isOfficialVersionId(storedScheduleSettings.versionId)
-        ? normalizeOfficialVersionId(storedScheduleSettings.versionId)
-        : getDefaultVersionId(),
+      stateRevision: SCHEDULE_STATE_REVISION,
+      selectedVersionId: getDefaultVersionId(),
       customVersions: [],
     };
   }
@@ -1110,6 +1236,7 @@
     storage.setItem(
       CUSTOM_VERSIONS_STORAGE_KEY,
       JSON.stringify({
+        stateRevision: SCHEDULE_STATE_REVISION,
         selectedVersionId: normalized.selectedVersionId,
         customVersions: normalized.customVersions.map(customVersionToStorage),
       }),
