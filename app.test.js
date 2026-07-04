@@ -538,15 +538,18 @@ test("la version officielle selectionnee est restauree apres rechargement", () =
   assert.equal(loaded.cycle, "M A N DN R R D D");
 });
 
-test("horaire actuel est la version de base par defaut", () => {
+test("la version equilibree est la version officielle par defaut", () => {
   const library = loadCustomVersionLibrary();
-  const settings = createScheduleSettingsForVersion(DEFAULT_VERSION_ID, SHIFT_DEFINITIONS);
+  const settings = loadScheduleSettings(undefined, SHIFT_DEFINITIONS);
+  const officialIds = Object.keys(VERSION_DEFINITIONS);
 
-  assert.equal(library.selectedVersionId, DEFAULT_VERSION_ID);
+  assert.deepEqual(officialIds, ["v7-balanced", "v7", "v8", DEFAULT_VERSION_ID]);
+  assert.equal(library.selectedVersionId, "v7-balanced");
   assert.equal(library.customVersions.length, 0);
-  assert.equal(settings.versionId, DEFAULT_VERSION_ID);
-  assert.equal(settings.baseVersionId, DEFAULT_VERSION_ID);
-  assert.equal(settings.cycle, "M A N DN R R D");
+  assert.equal(settings.versionId, "v7-balanced");
+  assert.equal(settings.baseVersionId, "v7-balanced");
+  assert.equal(settings.cycle.split(" ").length, 49);
+  assert.equal(VERSION_DEFINITIONS[DEFAULT_VERSION_ID].label, "Horaire actuel");
 });
 
 test("modifier un champ horaire hors version cree une version custom persistable", () => {
@@ -1071,18 +1074,18 @@ test("la version 7 series equilibree utilise deux Dispo courtes officielles", ()
   assert.equal(shifts.D, undefined);
   assert.equal(shifts.D1.role, "D");
   assert.equal(shifts.D1.startTime, "08:00");
-  assert.equal(shifts.D1.endTime, "14:00");
+  assert.equal(shifts.D1.endTime, "14:30");
   assert.equal(shifts.D1.breakStartTime, "11:00");
   assert.equal(shifts.D1.breakEndTime, "11:30");
   assert.equal(shifts.D1.unpaidBreakMinutes, 30);
-  assert.equal(shifts.D1.hours, 5.5);
+  assert.equal(shifts.D1.hours, 6);
   assert.equal(shifts.D2.role, "D");
   assert.equal(shifts.D2.startTime, "12:00");
-  assert.equal(shifts.D2.endTime, "18:00");
+  assert.equal(shifts.D2.endTime, "18:30");
   assert.equal(shifts.D2.breakStartTime, "15:00");
   assert.equal(shifts.D2.breakEndTime, "15:30");
   assert.equal(shifts.D2.unpaidBreakMinutes, 30);
-  assert.equal(shifts.D2.hours, 5.5);
+  assert.equal(shifts.D2.hours, 6);
   assert.equal(weekdayDispoRule.status, "pass");
   assert.equal(weekdayDispoRule.title, "Au moins 1 Dispo par jour ouvrable");
 });
@@ -1114,7 +1117,7 @@ test("les compteurs annuels de la version equilibree restent proches entre serie
   assert.equal(spread(simulation.stats.map((row) => row.weekendHoursYear)), 24);
   assert.equal(spread(simulation.stats.map((row) => row.nightCount)), 2);
   assert.equal(spread(simulation.stats.map((row) => row.nightHoursYear)), 16);
-  assert.equal(spread(simulation.stats.map((row) => row.totalHours)), 32.5);
+  assert.equal(spread(simulation.stats.map((row) => row.totalHours)), 34);
   assert.equal(Math.max(...simulation.stats.map((row) => row.averageWeeklyHours)) < 38, true);
   assert.equal(Math.max(...simulation.stats.map((row) => row.weekendWorkedYear)) <= 34, true);
 });

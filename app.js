@@ -31,6 +31,7 @@
     weekendHoursMonth: "Heures WE / mois",
   };
   const BALANCED_7_VERSION_ID = "v7-balanced";
+  const DEFAULT_SELECTED_VERSION_ID = BALANCED_7_VERSION_ID;
   const LEGACY_BALANCED_7_VERSION_IDS = new Set(["v7-balanced-v2", "v7-balanced-v3"]);
   const BALANCED_7_CYCLE = [
     "N",
@@ -97,12 +98,15 @@
   };
 
   const VERSION_DEFINITIONS = {
-    [DEFAULT_VERSION_ID]: {
-      id: DEFAULT_VERSION_ID,
-      label: CURRENT_VERSION_LABEL,
+    [BALANCED_7_VERSION_ID]: {
+      id: BALANCED_7_VERSION_ID,
+      label: "10h - 7 Séries Équilibré",
       weeks: 7,
       seriesCount: 7,
-      cycle: ["M", "A", "N", "DN", "R", "R", "D"],
+      seriesOffset: "7",
+      cycle: BALANCED_7_CYCLE,
+      weekdayDispoTarget: 1,
+      allowWeekendDoubleCoverage: true,
     },
     v7: {
       id: "v7",
@@ -118,15 +122,12 @@
       seriesCount: 8,
       cycle: ["M", "A", "N", "DN", "R", "R", "D", "D"],
     },
-    [BALANCED_7_VERSION_ID]: {
-      id: BALANCED_7_VERSION_ID,
-      label: "10h - 7 Séries Équilibré",
+    [DEFAULT_VERSION_ID]: {
+      id: DEFAULT_VERSION_ID,
+      label: CURRENT_VERSION_LABEL,
       weeks: 7,
       seriesCount: 7,
-      seriesOffset: "7",
-      cycle: BALANCED_7_CYCLE,
-      weekdayDispoTarget: 1,
-      allowWeekendDoubleCoverage: true,
+      cycle: ["M", "A", "N", "DN", "R", "R", "D"],
     },
   };
 
@@ -213,7 +214,7 @@
       label: "Dispo matin",
       color: "#2e7d54",
       startTime: "08:00",
-      endTime: "14:00",
+      endTime: "14:30",
       breakStartTime: "11:00",
       breakEndTime: "11:30",
       isOff: false,
@@ -225,7 +226,7 @@
       label: "Dispo après-midi",
       color: "#4f8f68",
       startTime: "12:00",
-      endTime: "18:00",
+      endTime: "18:30",
       breakStartTime: "15:00",
       breakEndTime: "15:30",
       isOff: false,
@@ -571,6 +572,9 @@
   }
 
   function getDefaultVersionId() {
+    if (VERSION_DEFINITIONS[DEFAULT_SELECTED_VERSION_ID]) {
+      return DEFAULT_SELECTED_VERSION_ID;
+    }
     return VERSION_DEFINITIONS[DEFAULT_VERSION_ID] ? DEFAULT_VERSION_ID : "v7";
   }
 
@@ -614,7 +618,10 @@
     return normalizeShiftDefinitions(definition.shiftDefinitions || DEFAULT_SHIFT_DEFINITION_LIST);
   }
 
-  function normalizeBaseVersionDefinition(input = {}, fallback = VERSION_DEFINITIONS[getDefaultVersionId()]) {
+  function normalizeBaseVersionDefinition(
+    input = {},
+    fallback = VERSION_DEFINITIONS[DEFAULT_VERSION_ID] || VERSION_DEFINITIONS[getDefaultVersionId()],
+  ) {
     const shiftDefinitions = normalizeShiftDefinitions(
       input.shiftDefinitions || fallback.shiftDefinitions || DEFAULT_SHIFT_DEFINITION_LIST,
     );
