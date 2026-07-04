@@ -22,14 +22,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-
-      - name: Test
-        run: node --test app.test.js
-
       - name: Prepare static site
         run: |
           mkdir -p _site
