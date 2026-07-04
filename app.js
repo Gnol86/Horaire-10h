@@ -2065,7 +2065,7 @@
   function formatDailyCoverageDetail(issues, label, options = {}) {
     if (issues.length === 0) {
       if (options.allowWeekendDoubleCoverage) {
-        return `Chaque jour a au moins une série en ${label}, avec doublage possible le week-end.`;
+        return `Chaque jour a au moins une série en ${label}.`;
       }
       return `Chaque jour a exactement une série en ${label}.`;
     }
@@ -2260,7 +2260,7 @@
       rules,
       "internal",
       "daily-morning-coverage",
-      allowWeekendDoubleCoverage ? "Un Matin par jour, week-end doublable" : "Un Matin par jour",
+      "Un Matin par jour",
       morningCoverageIssues.length === 0,
       formatDailyCoverageDetail(morningCoverageIssues, "Matin", weekendDoubleCoverageOptions),
     );
@@ -2268,9 +2268,7 @@
       rules,
       "internal",
       "daily-afternoon-coverage",
-      allowWeekendDoubleCoverage
-        ? "Un Après-midi par jour, week-end doublable"
-        : "Un Après-midi par jour",
+      "Un Après-midi par jour",
       afternoonCoverageIssues.length === 0,
       formatDailyCoverageDetail(afternoonCoverageIssues, "Après-midi", weekendDoubleCoverageOptions),
     );
