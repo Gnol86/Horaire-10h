@@ -1,1 +1,2 @@
 - Utilise file:///Users/arnaud/DEV/Horaire%2010h/index.html comme URL pour faire tes tests dans le navigateur interne. Ne lance pas de serveur local.
+- C'est un petit projet et pas besoin de faire de test.js
